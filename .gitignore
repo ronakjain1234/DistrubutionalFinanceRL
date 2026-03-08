@@ -1,0 +1,31 @@
+## Cursor / editor state
+.cursor/
+
+## Python virtual environments
+.venv/
+venv/
+
+## Python cache / build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+## Data & notebooks (optional – adjust as needed)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+notebooks/.ipynb_checkpoints/
+
+## OS / IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
