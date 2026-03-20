@@ -170,7 +170,6 @@ Expected outputs:
 - `data/processed/btc_daily_train.parquet`
 - `data/processed/btc_daily_val.parquet`
 - `data/processed/btc_daily_test.parquet`
-- `data/processed/btc_daily_feature_scaler.json`
 
 ### Step 3: Portfolio mechanics, rewards, and benchmarks
 

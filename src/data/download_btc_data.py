@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
 
@@ -15,11 +14,7 @@ import urllib.request
 _EXPECTED_COLUMNS: Final[set[str]] = {"open", "high", "low", "close", "volume"}
 
 
-
-def _parse_date(value: str) -> pd.Timestamp:
-    """
-    Parse an input date string into a normalized UTC timestamp (midnight).
-    """
+def _parse_date(value):
     ts = pd.to_datetime(value, utc=True)
     return ts.normalize()
 
@@ -229,7 +224,6 @@ def download_btc_daily(
     out_dir = cfg.out_dir
     parquet_path = out_dir / "btc_daily.parquet"
     csv_path = out_dir / "btc_daily.csv"
-    meta_path = out_dir / "btc_daily_meta.json"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     raw = raw_df_override if raw_df_override is not None else _download_from_coinbase_daily(
@@ -246,19 +240,6 @@ def download_btc_daily(
 
     raw.to_parquet(parquet_path, index=False)
     raw.to_csv(csv_path, index=False)
-
-    meta = {
-        "symbol": cfg.symbol,
-        "source": "coinbase",
-        "start_date": str(cfg.start_date.date()),
-        "end_date": str(cfg.end_date.date()),
-        "downloaded_at_utc": datetime.now(timezone.utc).isoformat(),
-        "max_ffill_gap_days": cfg.max_ffill_gap_days,
-        "n_rows": int(len(raw)),
-        "timestamp_tz": "UTC",
-        "columns": list(raw.columns),
-    }
-    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     print(f"Wrote cleaned BTC daily OHLCV to {parquet_path}")
     return parquet_path

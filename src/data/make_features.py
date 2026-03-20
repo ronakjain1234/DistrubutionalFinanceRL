@@ -13,13 +13,11 @@ Step 2 in the project roadmap:
 Outputs
 -------
 * `data/processed/btc_daily_features.parquet` (by default)
-* `data/processed/btc_daily_feature_meta.json` (feature column list + params)
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -119,7 +117,6 @@ def _make_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 class FeatureConfig:
     raw_path: Path
     out_path: Path
-    meta_path: Path
 
 
 def make_feature_panel(cfg: FeatureConfig) -> Path:
@@ -135,21 +132,9 @@ def make_feature_panel(cfg: FeatureConfig) -> Path:
     if missing:
         raise RuntimeError(f"Raw BTC parquet missing columns: {sorted(missing)}")
 
-    out_df, feature_cols = _make_features(df)
+    out_df, _ = _make_features(df)
     cfg.out_path.parent.mkdir(parents=True, exist_ok=True)
     out_df.to_parquet(cfg.out_path, index=False)
-
-    meta = {
-        "feature_cols": feature_cols,
-        "log_ret_windows": _DEFAULT_LOG_RET_WINDOWS,
-        "vol_windows": _DEFAULT_VOL_WINDOWS,
-        "ma_windows": _DEFAULT_MA_WINDOWS,
-        "rsi_period": 14,
-        "macd": {"fast": 12, "slow": 26, "signal": 9},
-        "target_col": "log_return_next_1d",
-        "universe": {"timestamp_tz": "UTC", "frequency": "1D"},
-    }
-    cfg.meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     print(f"Wrote BTC feature panel to {cfg.out_path}")
     return cfg.out_path
@@ -161,18 +146,11 @@ def main() -> None:
     parser.add_argument(
         "--out-path", type=str, default="data/processed/btc_daily_features.parquet", help="Output feature parquet path."
     )
-    parser.add_argument(
-        "--meta-path",
-        type=str,
-        default="data/processed/btc_daily_feature_meta.json",
-        help="Output JSON with feature column list and engineering parameters.",
-    )
     args = parser.parse_args()
 
     cfg = FeatureConfig(
         raw_path=Path(args.raw_path),
         out_path=Path(args.out_path),
-        meta_path=Path(args.meta_path),
     )
     out_path = make_feature_panel(cfg)
     print(f"Wrote BTC daily features: {out_path}")

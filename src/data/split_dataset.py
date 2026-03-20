@@ -8,20 +8,18 @@ Given an input parquet produced by `make_features.py`, it:
 1) selects rows by timestamp boundaries,
 2) computes z-score normalization parameters on the training split only,
 3) applies the normalization to all splits,
-4) writes three parquet files plus a scaler metadata JSON.
+4) writes three parquet files.
 
 Outputs (defaults)
 -------------------
 * `data/processed/btc_daily_train.parquet`
 * `data/processed/btc_daily_val.parquet`
 * `data/processed/btc_daily_test.parquet`
-* `data/processed/btc_daily_feature_scaler.json`
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -41,17 +39,8 @@ def _parse_date(value: str) -> pd.Timestamp:
     return ts.normalize()
 
 
-def _load_feature_columns(features_df: pd.DataFrame, meta_path: Path | None) -> list[str]:
-    """
-    Determine which columns are treated as observations for normalization.
-    """
-    if meta_path is not None and meta_path.exists():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        cols = meta.get("feature_cols")
-        if isinstance(cols, list) and all(isinstance(x, str) for x in cols):
-            return cols
-
-    # Fallback: everything except obvious non-features.
+def _infer_feature_columns(features_df: pd.DataFrame) -> list[str]:
+    """Infer which columns are treated as observations for normalization."""
     excluded = {
         "timestamp",
         "open",
@@ -69,7 +58,6 @@ def _load_feature_columns(features_df: pd.DataFrame, meta_path: Path | None) -> 
 class SplitConfig:
     features_path: Path
     out_dir: Path
-    meta_path: Path | None
     feature_cols: list[str] | None
     max_na_rows: int = 0
 
@@ -91,7 +79,7 @@ def split_and_normalize(
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.normalize()
     df = df.sort_values("timestamp")
 
-    feature_cols = cfg.feature_cols or _load_feature_columns(df, cfg.meta_path)
+    feature_cols = cfg.feature_cols or _infer_feature_columns(df)
 
     # Keep only rows with non-null target and non-null features at minimum.
     if "log_return_next_1d" not in df.columns:
@@ -115,20 +103,6 @@ def split_and_normalize(
     means = train_df[feature_cols].mean(axis=0)
     stds = train_df[feature_cols].std(axis=0, ddof=0).replace(0.0, 1.0)
 
-    scaler = {
-        "feature_cols": feature_cols,
-        "means": {k: float(means[k]) for k in feature_cols},
-        "stds": {k: float(stds[k]) for k in feature_cols},
-        "fitted_on": {
-            "train_start": str(splits["train"][0].date()),
-            "train_end": str(splits["train"][1].date()),
-        },
-        "normalization": "z_score",
-    }
-
-    scaler_path = out_dir / "btc_daily_feature_scaler.json"
-    scaler_path.write_text(json.dumps(scaler, indent=2), encoding="utf-8")
-
     # Apply normalization and save.
     written: dict[str, Path] = {}
     for split_name, sdf in split_dfs.items():
@@ -139,13 +113,6 @@ def split_and_normalize(
         norm.to_parquet(out_path, index=False)
         written[split_name] = out_path
 
-    split_meta = {
-        "splits": {k: [str(v[0].date()), str(v[1].date())] for k, v in splits.items()},
-        "n_rows": {k: int(len(v)) for k, v in split_dfs.items()},
-        "dropped_na": "Rows with NaNs in target/features were dropped before splitting.",
-    }
-    (out_dir / "btc_daily_splits.json").write_text(json.dumps(split_meta, indent=2), encoding="utf-8")
-
     print(f"Wrote split+normalized parquet files to {out_dir}")
     return written
 
@@ -153,7 +120,6 @@ def split_and_normalize(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Split BTC daily engineered features into time splits + normalize.")
     parser.add_argument("--features-path", type=str, default="data/processed/btc_daily_features.parquet")
-    parser.add_argument("--meta-path", type=str, default="data/processed/btc_daily_feature_meta.json")
     parser.add_argument("--out-dir", type=str, default="data/processed")
 
     # Allow overriding split boundaries from CLI.
@@ -169,7 +135,6 @@ def main() -> None:
     cfg = SplitConfig(
         features_path=Path(args.features_path),
         out_dir=Path(args.out_dir),
-        meta_path=Path(args.meta_path) if args.meta_path else None,
         feature_cols=None,
     )
 
