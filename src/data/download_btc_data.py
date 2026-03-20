@@ -1,35 +1,36 @@
 from __future__ import annotations
 
-import argparse
 import json
+import time
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 import pandas as pd
-import time
-import urllib.parse
-import urllib.request
 
 _EXPECTED_COLUMNS: Final[set[str]] = {"open", "high", "low", "close", "volume"}
 
+SYMBOL: Final[str] = "BTC-USD"
+START_DATE: Final[str] = "2017-07-01"
+END_DATE: Final[str] = "2025-12-31"
+OUT_DIR: Final[str] = "data/raw"
 
-def _parse_date(value):
+
+def _parse_date(value: str) -> pd.Timestamp:
     ts = pd.to_datetime(value, utc=True)
     return ts.normalize()
 
 
 def _iso_utc_day(ts: pd.Timestamp) -> str:
     ts = ts.tz_convert("UTC") if ts.tzinfo is not None else ts.tz_localize("UTC")
-    ts = ts.normalize()  
+    ts = ts.normalize()
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-
 def _request_json(url: str, *, timeout_s: int = 30, max_retries: int = 5) -> object:
-    """
-    Small HTTP helper with basic retry for transient failures / rate limiting.
-    """
+    """Small HTTP helper with basic retry for transient failures / rate limiting."""
     headers = {
         "User-Agent": "DistrubutionalFinanceRL/Step2BTCDownloader (Educational)",
         "Accept": "application/json",
@@ -41,9 +42,8 @@ def _request_json(url: str, *, timeout_s: int = 30, max_retries: int = 5) -> obj
             with urllib.request.urlopen(req, timeout=timeout_s) as resp:
                 payload = resp.read().decode("utf-8")
                 return json.loads(payload)
-        except Exception as e:  # noqa: BLE001 - we want to retry multiple failure modes
+        except Exception as e:  # noqa: BLE001
             last_err = e
-            # Simple backoff; Coinbase commonly returns 429 on rate limiting.
             sleep_s = min(2**attempt, 30)
             print(
                 f"Request failed (attempt {attempt}/{max_retries}): {e}. Sleeping {sleep_s:.1f}s"
@@ -64,7 +64,6 @@ def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_t
     """
     base_url = f"https://api.exchange.coinbase.com/products/{product_id}/candles"
 
-    # Daily candles: 300-per-request means ~300 days max per call.
     chunk_days = 295
     cursor = start_ts
     chunks: list[pd.DataFrame] = []
@@ -83,7 +82,6 @@ def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_t
         if not isinstance(payload, list) or not payload:
             break
 
-        # Each candle is [time, low, high, open, close, volume]
         rows: list[list[object]] = payload  # type: ignore[assignment]
         df = pd.DataFrame(
             rows,
@@ -96,7 +94,6 @@ def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_t
         df = df.drop_duplicates(subset=["timestamp"], keep="last")
         chunks.append(df)
 
-        # Advance by 1 day to avoid overlap.
         cursor = chunk_end + pd.Timedelta(days=1)
 
     if not chunks:
@@ -104,43 +101,6 @@ def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_t
 
     out = pd.concat(chunks, ignore_index=True).drop_duplicates(subset=["timestamp"], keep="last")
     return out.sort_values("timestamp")
-
-
-def _load_local_btc_ohlcv(path: Path) -> pd.DataFrame:
-    """
-    Load a local BTC OHLCV dataset.
-
-    Expected columns (case-insensitive):
-    * timestamp/date (daily timestamp)
-    * open, high, low, close, volume
-    """
-    if not path.exists():
-        raise FileNotFoundError(str(path))
-
-    if path.suffix.lower() == ".parquet":
-        df = pd.read_parquet(path)
-    else:
-        # Assume CSV
-        df = pd.read_csv(path)
-
-    df.columns = [c.lower() for c in df.columns]
-    if "date" in df.columns and "timestamp" not in df.columns:
-        df = df.rename(columns={"date": "timestamp"})
-    if "timestamp" not in df.columns:
-        raise RuntimeError(f"Local BTC data must include a 'timestamp' or 'date' column; got {list(df.columns)}")
-
-    missing = _EXPECTED_COLUMNS.difference(set(df.columns))
-    if missing:
-        raise RuntimeError(f"Local BTC data missing columns: {sorted(missing)}")
-
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.normalize()
-
-    df = df[["timestamp", "open", "high", "low", "close", "volume"]].drop_duplicates(
-        subset=["timestamp"], keep="last"
-    )
-    return df.sort_values("timestamp")
 
 
 def _reindex_and_fill(
@@ -155,10 +115,10 @@ def _reindex_and_fill(
 
     Policy
     ------
-    * All timestamps are forced to UTC midnight (`freq="D"`).
+    * All timestamps are forced to UTC midnight (freq="D").
     * If OHLC is missing because a day is absent, we forward-fill prices for
-      gaps of length <= `max_ffill_gap_days`.
-    * For those imputed rows, we set `volume=0.0` (volume is not meaningfully
+      gaps of length <= max_ffill_gap_days.
+    * For those imputed rows, we set volume=0.0 (volume is not meaningfully
       known for the missing day).
     * Rows with remaining missing OHLC after the above policy are dropped.
     """
@@ -172,12 +132,10 @@ def _reindex_and_fill(
     price_cols = ["open", "high", "low", "close"]
     missing_mask = df["close"].isna()
 
-    # Identify consecutive missing runs to decide which can be forward-filled.
     run_id = (missing_mask != missing_mask.shift()).cumsum()
     imputed_mask = pd.Series(False, index=df.index)
 
     for _, grp_idx in missing_mask.groupby(run_id).groups.items():
-        # grp_idx is an Index of timestamps for this run.
         grp_timestamps = pd.Index(grp_idx)
         if grp_timestamps.empty:
             continue
@@ -187,17 +145,14 @@ def _reindex_and_fill(
         if run_len <= max_ffill_gap_days:
             imputed_mask.loc[grp_timestamps] = True
 
-    # Apply forward-fill only for selected imputed timestamps.
     df_ffill = df.copy()
     df_ffill[price_cols] = df_ffill[price_cols].ffill()
     df.loc[imputed_mask, price_cols] = df_ffill.loc[imputed_mask, price_cols]
     df.loc[imputed_mask, "volume"] = 0.0
 
-    # Drop any remaining missing OHLC.
     df = df.dropna(subset=price_cols)
     df = df.reset_index().rename(columns={"index": "timestamp"})
 
-    # Basic sanity: non-negative OHLCV.
     for col in price_cols + ["volume"]:
         df[col] = df[col].clip(lower=0)
 
@@ -206,10 +161,10 @@ def _reindex_and_fill(
 
 @dataclass(frozen=True)
 class DownloadConfig:
-    symbol: str
-    start_date: pd.Timestamp
-    end_date: pd.Timestamp
-    out_dir: Path
+    symbol: str = SYMBOL
+    start_date: pd.Timestamp = _parse_date(START_DATE)
+    end_date: pd.Timestamp = _parse_date(END_DATE)
+    out_dir: Path = Path(OUT_DIR)
     max_ffill_gap_days: int = 2
 
 
@@ -218,9 +173,7 @@ def download_btc_daily(
     *,
     raw_df_override: pd.DataFrame | None = None,
 ) -> Path:
-    """
-    Download BTC daily OHLCV and write it to the raw data directory.
-    """
+    """Download BTC daily OHLCV and write it to the raw data directory."""
     out_dir = cfg.out_dir
     parquet_path = out_dir / "btc_daily.parquet"
     csv_path = out_dir / "btc_daily.csv"
@@ -241,55 +194,17 @@ def download_btc_daily(
     raw.to_parquet(parquet_path, index=False)
     raw.to_csv(csv_path, index=False)
 
-    print(f"Wrote cleaned BTC daily OHLCV to {parquet_path}")
+    print(f"Wrote cleaned BTC daily OHLCV ({len(raw)} rows)")
+    print(f"  Parquet: {parquet_path}")
+    print(f"  CSV:     {csv_path}")
     return parquet_path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download and clean BTC daily OHLCV data.")
-    parser.add_argument(
-        "--symbol",
-        type=str,
-        default="BTC-USD",
-        help="Coinbase product id (e.g. BTC-USD).",
-    )
-    parser.add_argument("--start-date", type=str, default="2016-01-01", help="Start date (inclusive), e.g. 2016-01-01.")
-    parser.add_argument("--end-date", type=str, default="2025-12-31", help="End date (inclusive), e.g. 2025-12-31.")
-    parser.add_argument("--out-dir", type=str, default="data/raw", help="Output directory for raw parquet/csv.")
-    parser.add_argument(
-        "--max-ffill-gap-days",
-        type=int,
-        default=2,
-        help="Forward-fill prices for missing days if the gap length is <= this value.",
-    )
-    parser.add_argument("--input-csv", type=str, default="", help="Optional local CSV path to load instead of downloading.")
-    parser.add_argument(
-        "--input-parquet", type=str, default="", help="Optional local Parquet path to load instead of downloading."
-    )
-
-    args = parser.parse_args()
-
-    if args.input_csv and args.input_parquet:
-        raise SystemExit("Provide at most one of --input-csv or --input-parquet.")
-
-    raw_override: pd.DataFrame | None = None
-    if args.input_csv:
-        raw_override = _load_local_btc_ohlcv(Path(args.input_csv))
-    elif args.input_parquet:
-        raw_override = _load_local_btc_ohlcv(Path(args.input_parquet))
-
-    cfg = DownloadConfig(
-        symbol=args.symbol,
-        start_date=_parse_date(args.start_date),
-        end_date=_parse_date(args.end_date),
-        out_dir=Path(args.out_dir),
-        max_ffill_gap_days=int(args.max_ffill_gap_days),
-    )
-
-    parquet_path = download_btc_daily(cfg, raw_df_override=raw_override)
-    print(f"Downloaded BTC daily OHLCV: {parquet_path}")
+    cfg = DownloadConfig()
+    parquet_path = download_btc_daily(cfg)
+    print(f"\nDone. BTC daily OHLCV saved to {parquet_path.parent}")
 
 
 if __name__ == "__main__":
     main()
-
