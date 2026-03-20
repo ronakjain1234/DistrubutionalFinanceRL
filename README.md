@@ -141,18 +141,36 @@ DistrubutionalFinanceRL/
 
 - **Goal**: Build a reproducible pipeline to obtain and preprocess BTC price data into a clean panel suitable for offline RL.
 - **Tasks**:
-  - Choose data source and frequency (start with **daily or 1h BTC-USDT candles** from 2016–2025) and standardize to CSV/Parquet in `data/raw`.
-  - Implement `download_btc_data.py` in `src/data` that:
+  - Choose data source and frequency (start with **daily or 1h BTC-USD candles** from 2016–2025) and standardize to CSV/Parquet in `data/raw`.
+  - Implement `src/data/download_btc_data.py` that:
     - Fetches raw data (or loads local CSVs).
     - Ensures consistent timezone and no duplicate timestamps.
     - Fills small gaps or drops days with missing values according to a clear rule.
-  - Implement `make_features.py` in `src/data` that constructs state features per timestamp:
+  - Implement `src/data/make_features.py` that constructs state features per timestamp:
     - Rolling log returns over different windows (e.g. 1, 5, 20 periods).
     - Realized volatility (rolling std of returns).
     - Momentum indicators (moving averages, RSI, MACD, etc.).
     - Optional volume-based features.
-  - Normalize/scale features (e.g. z-score) using training-period statistics only.
+  - Normalize/scale features (e.g. z-score) using training-period statistics only (via `src/data/split_dataset.py`).
   - Split the timeline into train/validation/test (e.g. 2016–2020 train, 2021–2022 val, 2023–2025 test) and store results in `data/processed`.
+
+#### Quickstart: Step 2 (BTC daily)
+
+Run the end-to-end daily pipeline:
+
+```bash
+python -m src.data.download_btc_data --symbol BTC-USD --start-date 2016-01-01 --end-date 2025-12-31
+python -m src.data.make_features --raw-path data/raw/btc_daily.parquet
+python -m src.data.split_dataset --features-path data/processed/btc_daily_features.parquet
+```
+
+Expected outputs:
+- `data/raw/btc_daily.parquet`
+- `data/processed/btc_daily_features.parquet`
+- `data/processed/btc_daily_train.parquet`
+- `data/processed/btc_daily_val.parquet`
+- `data/processed/btc_daily_test.parquet`
+- `data/processed/btc_daily_feature_scaler.json`
 
 ### Step 3: Portfolio mechanics, rewards, and benchmarks
 
