@@ -18,19 +18,18 @@ END_DATE: Final[str] = "2025-12-31"
 OUT_DIR: Final[str] = "data/raw"
 
 
-def _parse_date(value: str) -> pd.Timestamp:
+def _parse_date(value):
     ts = pd.to_datetime(value, utc=True)
     return ts.normalize()
 
 
-def _iso_utc_day(ts: pd.Timestamp) -> str:
+def _iso_utc_day(ts):
     ts = ts.tz_convert("UTC") if ts.tzinfo is not None else ts.tz_localize("UTC")
     ts = ts.normalize()
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _request_json(url: str, *, timeout_s: int = 30, max_retries: int = 5) -> object:
-    """Small HTTP helper with basic retry for transient failures / rate limiting."""
+def _request_json(url, *, timeout_s=30, max_retries=5):
     headers = {
         "User-Agent": "DistrubutionalFinanceRL/Step2BTCDownloader (Educational)",
         "Accept": "application/json",
@@ -53,15 +52,7 @@ def _request_json(url: str, *, timeout_s: int = 30, max_retries: int = 5) -> obj
     raise RuntimeError(f"Failed request after {max_retries} retries: {url}. Last error: {last_err}") from last_err
 
 
-def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
-    """
-    Download daily OHLCV candles from Coinbase Exchange.
-
-    Uses: GET /products/{product_id}/candles
-    with: granularity=86400 (1 day)
-
-    Coinbase returns up to ~300 candles per request, so we paginate by chunks.
-    """
+def _download_from_coinbase_daily(product_id, start_ts, end_ts):
     base_url = f"https://api.exchange.coinbase.com/products/{product_id}/candles"
 
     chunk_days = 295
@@ -103,25 +94,7 @@ def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_t
     return out.sort_values("timestamp")
 
 
-def _reindex_and_fill(
-    df: pd.DataFrame,
-    start_ts: pd.Timestamp,
-    end_ts: pd.Timestamp,
-    *,
-    max_ffill_gap_days: int,
-) -> pd.DataFrame:
-    """
-    Reindex to a daily grid and fill "small" gaps using forward-fill.
-
-    Policy
-    ------
-    * All timestamps are forced to UTC midnight (freq="D").
-    * If OHLC is missing because a day is absent, we forward-fill prices for
-      gaps of length <= max_ffill_gap_days.
-    * For those imputed rows, we set volume=0.0 (volume is not meaningfully
-      known for the missing day).
-    * Rows with remaining missing OHLC after the above policy are dropped.
-    """
+def _reindex_and_fill(df, start_ts, end_ts, *, max_ffill_gap_days):
     if df.empty:
         raise ValueError("Downloaded dataframe is empty.")
 
@@ -172,8 +145,7 @@ def download_btc_daily(
     cfg: DownloadConfig,
     *,
     raw_df_override: pd.DataFrame | None = None,
-) -> Path:
-    """Download BTC daily OHLCV and write it to the raw data directory."""
+):
     out_dir = cfg.out_dir
     parquet_path = out_dir / "btc_daily.parquet"
     csv_path = out_dir / "btc_daily.csv"
@@ -200,7 +172,7 @@ def download_btc_daily(
     return parquet_path
 
 
-def main() -> None:
+def main():
     cfg = DownloadConfig()
     parquet_path = download_btc_daily(cfg)
     print(f"\nDone. BTC daily OHLCV saved to {parquet_path.parent}")

@@ -1,20 +1,3 @@
-"""
-Create a BTC feature panel for offline RL.
-
-This module implements the "preprocessing / feature engineering" portion of
-Step 2 in the project roadmap:
-
-* rolling log returns over multiple windows
-* realized volatility (rolling std of log returns)
-* momentum features (moving average ratios, RSI, MACD)
-* simple volume features
-* creation of the next-step return target (`log_return_next_1d`)
-
-Outputs
--------
-* `data/processed/btc_daily_features.parquet` (by default)
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,10 +15,8 @@ RAW_PATH: Final[str] = "data/raw/btc_daily.parquet"
 OUT_PATH: Final[str] = "data/processed/btc_daily_features.parquet"
 
 
-def _compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
-    """
-    Compute RSI using exponential moving averages (EMA smoothing).
-    """
+def _compute_rsi(close, period=14):
+
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = (-delta).clip(lower=0)
@@ -49,13 +30,7 @@ def _compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     return rsi
 
 
-def _make_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """
-    Compute engineered features on a daily OHLCV dataframe.
-
-    Expects columns:
-    * timestamp, open, high, low, close, volume
-    """
+def _make_features(df):
     df = df.sort_values("timestamp").reset_index(drop=True).copy()
 
     # Base series
@@ -120,10 +95,7 @@ class FeatureConfig:
     out_path: Path = Path(OUT_PATH)
 
 
-def make_feature_panel(cfg: FeatureConfig) -> Path:
-    """
-    Load raw BTC data, compute features, write the full (un-normalized) panel.
-    """
+def make_feature_panel(cfg: FeatureConfig):
     if not cfg.raw_path.exists():
         raise FileNotFoundError(f"Raw input not found: {cfg.raw_path}")
 
@@ -141,7 +113,7 @@ def make_feature_panel(cfg: FeatureConfig) -> Path:
     return cfg.out_path
 
 
-def main() -> None:
+def main():
     cfg = FeatureConfig()
     out_path = make_feature_panel(cfg)
     print(f"Wrote BTC daily features: {out_path}")
