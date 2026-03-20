@@ -1,24 +1,7 @@
-"""
-Download and clean BTC daily OHLCV data.
-
-This module implements the "data acquisition" portion of Step 2 in the project
-roadmap. It downloads a daily BTC series, enforces consistent timestamps,
-removes duplicates, and applies a clear missing-data policy.
-
-Default source: `coinbase` (daily BTC OHLCV candles).
-
-Outputs
--------
-* `data/raw/btc_daily.parquet` (by default): cleaned daily OHLCV
-* `data/raw/btc_daily.csv`: same data in CSV form
-* `data/raw/btc_daily_meta.json`: download metadata and assumptions
-"""
-
 from __future__ import annotations
 
 import argparse
 import json
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,9 +12,8 @@ import time
 import urllib.parse
 import urllib.request
 
-LOGGER = logging.getLogger(__name__)
-
 _EXPECTED_COLUMNS: Final[set[str]] = {"open", "high", "low", "close", "volume"}
+
 
 
 def _parse_date(value: str) -> pd.Timestamp:
@@ -43,11 +25,10 @@ def _parse_date(value: str) -> pd.Timestamp:
 
 
 def _iso_utc_day(ts: pd.Timestamp) -> str:
-    """
-    Format a timestamp as ISO UTC 'YYYY-MM-DDTHH:MM:SSZ' for Coinbase params.
-    """
     ts = ts.tz_convert("UTC") if ts.tzinfo is not None else ts.tz_localize("UTC")
+    ts = ts.normalize()  
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 
 def _request_json(url: str, *, timeout_s: int = 30, max_retries: int = 5) -> object:
@@ -69,7 +50,9 @@ def _request_json(url: str, *, timeout_s: int = 30, max_retries: int = 5) -> obj
             last_err = e
             # Simple backoff; Coinbase commonly returns 429 on rate limiting.
             sleep_s = min(2**attempt, 30)
-            LOGGER.warning("Request failed (attempt %d/%d): %s. Sleeping %.1fs", attempt, max_retries, e, sleep_s)
+            print(
+                f"Request failed (attempt {attempt}/{max_retries}): {e}. Sleeping {sleep_s:.1f}s"
+            )
             time.sleep(sleep_s)
     assert last_err is not None
     raise RuntimeError(f"Failed request after {max_retries} retries: {url}. Last error: {last_err}") from last_err
@@ -99,7 +82,7 @@ def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_t
             "end": _iso_utc_day(chunk_end),
         }
         url = f"{base_url}?{urllib.parse.urlencode(params)}"
-        LOGGER.info("Downloading Coinbase candles: %s", url)
+        print(f"Downloading Coinbase candles: {url}")
 
         payload = _request_json(url)
         if not isinstance(payload, list) or not payload:
@@ -111,7 +94,7 @@ def _download_from_coinbase_daily(product_id: str, start_ts: pd.Timestamp, end_t
             rows,
             columns=["timestamp", "low", "high", "open", "close", "volume"],
         )
-        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.normalize()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.normalize()
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df[["timestamp", "open", "high", "low", "close", "volume"]]
@@ -277,7 +260,7 @@ def download_btc_daily(
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-    LOGGER.info("Wrote cleaned BTC daily OHLCV to %s", parquet_path)
+    print(f"Wrote cleaned BTC daily OHLCV to {parquet_path}")
     return parquet_path
 
 
@@ -302,10 +285,8 @@ def main() -> None:
     parser.add_argument(
         "--input-parquet", type=str, default="", help="Optional local Parquet path to load instead of downloading."
     )
-    parser.add_argument("--log-level", type=str, default="INFO", help="Logging verbosity (DEBUG, INFO, WARNING).")
 
     args = parser.parse_args()
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     if args.input_csv and args.input_parquet:
         raise SystemExit("Provide at most one of --input-csv or --input-parquet.")

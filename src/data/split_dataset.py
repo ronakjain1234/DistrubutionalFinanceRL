@@ -22,14 +22,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 import pandas as pd
-
-LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_SPLITS: Final[dict[str, tuple[str, str]]] = {
     # Matches the README roadmap examples.
@@ -108,7 +105,7 @@ def split_and_normalize(
         mask = df["timestamp"].between(start_ts, end_ts, inclusive="both")
         split_dfs[split_name] = df.loc[mask].copy()
         if split_dfs[split_name].empty:
-            LOGGER.warning("Split %s is empty for bounds %s..%s", split_name, start_ts, end_ts)
+            print(f"Split {split_name} is empty for bounds {start_ts}..{end_ts}")
 
     # Fit scaler on training only.
     train_df = split_dfs.get("train")
@@ -149,7 +146,7 @@ def split_and_normalize(
     }
     (out_dir / "btc_daily_splits.json").write_text(json.dumps(split_meta, indent=2), encoding="utf-8")
 
-    LOGGER.info("Wrote split+normalized parquet files to %s", out_dir)
+    print(f"Wrote split+normalized parquet files to {out_dir}")
     return written
 
 
@@ -158,7 +155,6 @@ def main() -> None:
     parser.add_argument("--features-path", type=str, default="data/processed/btc_daily_features.parquet")
     parser.add_argument("--meta-path", type=str, default="data/processed/btc_daily_feature_meta.json")
     parser.add_argument("--out-dir", type=str, default="data/processed")
-    parser.add_argument("--log-level", type=str, default="INFO")
 
     # Allow overriding split boundaries from CLI.
     parser.add_argument("--train-start", type=str, default=_DEFAULT_SPLITS["train"][0])
@@ -169,7 +165,6 @@ def main() -> None:
     parser.add_argument("--test-end", type=str, default=_DEFAULT_SPLITS["test"][1])
 
     args = parser.parse_args()
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     cfg = SplitConfig(
         features_path=Path(args.features_path),

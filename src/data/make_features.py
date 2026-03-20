@@ -20,15 +20,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 import numpy as np
 import pandas as pd
-
-LOGGER = logging.getLogger(__name__)
 
 
 _DEFAULT_LOG_RET_WINDOWS: Final[list[int]] = [1, 5, 20]
@@ -154,7 +151,7 @@ def make_feature_panel(cfg: FeatureConfig) -> Path:
     }
     cfg.meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-    LOGGER.info("Wrote BTC feature panel to %s", cfg.out_path)
+    print(f"Wrote BTC feature panel to {cfg.out_path}")
     return cfg.out_path
 
 
@@ -170,10 +167,7 @@ def main() -> None:
         default="data/processed/btc_daily_feature_meta.json",
         help="Output JSON with feature column list and engineering parameters.",
     )
-    parser.add_argument("--log-level", type=str, default="INFO", help="Logging verbosity.")
     args = parser.parse_args()
-
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
 
     cfg = FeatureConfig(
         raw_path=Path(args.raw_path),
