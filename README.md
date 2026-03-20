@@ -160,8 +160,8 @@ Run the end-to-end daily pipeline (defaults: BTC-USD, 2017-07-01 to 2025-12-31):
 
 ```bash
 python -m src.data.download_btc_data
-python -m src.data.make_features --raw-path data/raw/btc_daily.parquet
-python -m src.data.split_dataset --features-path data/processed/btc_daily_features.parquet
+python -m src.data.make_features
+python -m src.data.split_dataset
 ```
 
 Expected outputs:

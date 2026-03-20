@@ -17,7 +17,6 @@ Outputs
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -29,6 +28,8 @@ import pandas as pd
 _DEFAULT_LOG_RET_WINDOWS: Final[list[int]] = [1, 5, 20]
 _DEFAULT_VOL_WINDOWS: Final[list[int]] = [5, 20]
 _DEFAULT_MA_WINDOWS: Final[list[int]] = [10, 20, 50]
+RAW_PATH: Final[str] = "data/raw/btc_daily.parquet"
+OUT_PATH: Final[str] = "data/processed/btc_daily_features.parquet"
 
 
 def _compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -115,8 +116,8 @@ def _make_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
 @dataclass(frozen=True)
 class FeatureConfig:
-    raw_path: Path
-    out_path: Path
+    raw_path: Path = Path(RAW_PATH)
+    out_path: Path = Path(OUT_PATH)
 
 
 def make_feature_panel(cfg: FeatureConfig) -> Path:
@@ -141,17 +142,7 @@ def make_feature_panel(cfg: FeatureConfig) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create BTC daily feature panel.")
-    parser.add_argument("--raw-path", type=str, default="data/raw/btc_daily.parquet", help="Path to cleaned raw BTC parquet.")
-    parser.add_argument(
-        "--out-path", type=str, default="data/processed/btc_daily_features.parquet", help="Output feature parquet path."
-    )
-    args = parser.parse_args()
-
-    cfg = FeatureConfig(
-        raw_path=Path(args.raw_path),
-        out_path=Path(args.out_path),
-    )
+    cfg = FeatureConfig()
     out_path = make_feature_panel(cfg)
     print(f"Wrote BTC daily features: {out_path}")
 

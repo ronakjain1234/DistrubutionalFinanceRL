@@ -19,18 +19,19 @@ Outputs (defaults)
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 import pandas as pd
 
+FEATURES_PATH: Final[str] = "data/processed/btc_daily_features.parquet"
+OUT_DIR: Final[str] = "data/processed"
 _DEFAULT_SPLITS: Final[dict[str, tuple[str, str]]] = {
     # Matches the README roadmap examples.
-    "train": ("2016-01-01", "2020-12-31"),
-    "val": ("2021-01-01", "2022-12-31"),
-    "test": ("2023-01-01", "2025-12-31"),
+    "train": ("2017-07-01", "2021-12-31"),
+    "val": ("2022-01-01", "2023-12-31"),
+    "test": ("2024-01-01", "2025-12-31"),
 }
 
 
@@ -56,9 +57,9 @@ def _infer_feature_columns(features_df: pd.DataFrame) -> list[str]:
 
 @dataclass(frozen=True)
 class SplitConfig:
-    features_path: Path
-    out_dir: Path
-    feature_cols: list[str] | None
+    features_path: Path = Path(FEATURES_PATH)
+    out_dir: Path = Path(OUT_DIR)
+    feature_cols: list[str] | None = None
     max_na_rows: int = 0
 
 
@@ -118,30 +119,12 @@ def split_and_normalize(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Split BTC daily engineered features into time splits + normalize.")
-    parser.add_argument("--features-path", type=str, default="data/processed/btc_daily_features.parquet")
-    parser.add_argument("--out-dir", type=str, default="data/processed")
-
-    # Allow overriding split boundaries from CLI.
-    parser.add_argument("--train-start", type=str, default=_DEFAULT_SPLITS["train"][0])
-    parser.add_argument("--train-end", type=str, default=_DEFAULT_SPLITS["train"][1])
-    parser.add_argument("--val-start", type=str, default=_DEFAULT_SPLITS["val"][0])
-    parser.add_argument("--val-end", type=str, default=_DEFAULT_SPLITS["val"][1])
-    parser.add_argument("--test-start", type=str, default=_DEFAULT_SPLITS["test"][0])
-    parser.add_argument("--test-end", type=str, default=_DEFAULT_SPLITS["test"][1])
-
-    args = parser.parse_args()
-
-    cfg = SplitConfig(
-        features_path=Path(args.features_path),
-        out_dir=Path(args.out_dir),
-        feature_cols=None,
-    )
+    cfg = SplitConfig()
 
     splits = {
-        "train": (_parse_date(args.train_start), _parse_date(args.train_end)),
-        "val": (_parse_date(args.val_start), _parse_date(args.val_end)),
-        "test": (_parse_date(args.test_start), _parse_date(args.test_end)),
+        "train": (_parse_date(_DEFAULT_SPLITS["train"][0]), _parse_date(_DEFAULT_SPLITS["train"][1])),
+        "val": (_parse_date(_DEFAULT_SPLITS["val"][0]), _parse_date(_DEFAULT_SPLITS["val"][1])),
+        "test": (_parse_date(_DEFAULT_SPLITS["test"][0]), _parse_date(_DEFAULT_SPLITS["test"][1])),
     }
 
     written = split_and_normalize(cfg, splits=splits)
