@@ -104,14 +104,14 @@ def simulate_portfolio(
     step_log_returns = np.empty(n, dtype=np.float64)
     turnover = np.empty(n, dtype=np.float64)
 
-    v = float(cfg.initial_equity)
-    w_prev = float(cfg.initial_position)
+    v = cfg.initial_equity # The current value of the portfolio
+    w_prev = cfg.initial_position # The previous position of the portfolio
     equity[0] = v
 
     cost_per_unit_turnover = cfg.fee_rate + cfg.slippage_rate
 
     for t in range(n):
-        w_t = float(w[t])
+        w_t = w[t]
         turnover[t] = abs(w_t - w_prev)
         cost_frac = cost_per_unit_turnover * turnover[t]
         v_after_cost = v * (1.0 - cost_frac)
@@ -133,6 +133,3 @@ def simulate_portfolio(
     )
 
 
-def price_relative_from_log_return(log_r: float | np.ndarray) -> float | np.ndarray:
-    """Convert one-step log return ``log(P_{t+1}/P_t)`` to price relative ``P_{t+1}/P_t``."""
-    return np.exp(np.asarray(log_r, dtype=np.float64))
