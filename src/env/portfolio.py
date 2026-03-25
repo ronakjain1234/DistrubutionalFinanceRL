@@ -3,8 +3,7 @@ Portfolio mechanics for BTC offline RL: positions, PnL, costs, and rewards.
 
 Action space (Step 3 roadmap)
 -----------------------------
-* **Signed exposure** (continuous in {-1, 0, +1}): short / flat / long with unit leverage.
-* **Discrete indices** (for Gym-style envs): 0 = short, 1 = flat, 2 = long.
+* **Signed exposure**: -1 (short), 0 (flat), +1 (long).
 
 At each step *t*, the chosen position applies to the interval from *t* to *t+1* using the
 price relative :math:`P_{t+1}/P_t`. Turnover-based fees are charged when the position changes
@@ -19,31 +18,12 @@ from typing import Literal
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Action encoding (Gym-style integer actions -> signed exposure)
+# Action constants (signed exposure)
 # ---------------------------------------------------------------------------
 
-ACTION_SHORT = 0
-ACTION_FLAT = 1
-ACTION_LONG = 2
-
-_DISCRETE_TO_SIGNED = np.array([-1.0, 0.0, 1.0], dtype=np.float64)
-
-
-def discrete_action_to_position(action: int | np.ndarray) -> float | np.ndarray:
-    """Map discrete env action in {0,1,2} to signed position in {-1, 0, +1}."""
-    a = np.asarray(action, dtype=np.int64)
-    if np.any((a < 0) | (a > 2)):
-        raise ValueError("Discrete action must be in {0, 1, 2} (short, flat, long).")
-    return _DISCRETE_TO_SIGNED[a]
-
-
-def signed_position_to_discrete(position: float) -> int:
-    """Map signed position in {-1, 0, +1} to discrete action in {0, 1, 2}."""
-    mapping = {-1.0: ACTION_SHORT, 0.0: ACTION_FLAT, 1.0: ACTION_LONG}
-    try:
-        return mapping[float(position)]
-    except KeyError as e:
-        raise ValueError("Signed position must be exactly -1, 0, or +1.") from e
+ACTION_SHORT = -1
+ACTION_FLAT = 0
+ACTION_LONG = 1
 
 
 # ---------------------------------------------------------------------------
