@@ -33,7 +33,7 @@ class BuyAndHoldReport:
     metrics: dict[str, float]
 
 
-def _compute_drawdown_series(equity: np.ndarray) -> np.ndarray:
+def _compute_drawdown_series(equity):
     peak = np.maximum.accumulate(equity)
     with np.errstate(divide="ignore", invalid="ignore"):
         return (equity - peak) / peak
@@ -152,7 +152,7 @@ def run_buy_and_hold_all_splits(
     return out
 
 
-def print_buy_and_hold_summary(reports: dict[str, BuyAndHoldReport]) -> None:
+def print_buy_and_hold_summary(reports):
     """Pretty-print metrics for each split."""
     for name, rep in reports.items():
         print(f"\n=== Buy-and-hold ({name}) - {rep.source_path.name} ===")
