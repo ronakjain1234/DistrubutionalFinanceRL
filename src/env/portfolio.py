@@ -13,7 +13,6 @@ before that return is applied.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 
@@ -50,13 +49,6 @@ class PortfolioConfig:
     slippage_rate: float = 0.0
     """Additional turnover cost (same units as ``fee_rate``), optional."""
 
-    reward_kind: Literal["log_return_after_costs"] = "log_return_after_costs"
-    """
-    How to map each step's portfolio growth into the scalar reward for RL.
-
-    * ``log_return_after_costs`` — :math:`\\log(V_{t+1}/V_t)` including fees (default).
-    """
-
 
 @dataclass
 class PortfolioResult:
@@ -68,24 +60,11 @@ class PortfolioResult:
     step_log_returns: np.ndarray
     """Natural log of growth factor each step (after costs); shape ``(n_steps,)``."""
 
-    rewards: np.ndarray
-    """RL reward at each step; by default equals ``step_log_returns``."""
-
     turnover: np.ndarray
     """|Δw| each step; shape ``(n_steps,)``."""
 
     positions: np.ndarray
     """Signed position applied each step; shape ``(n_steps,)``."""
-
-
-def _reward_from_step_log_returns(
-    step_log_returns: np.ndarray,
-    *,
-    reward_kind: str,
-) -> np.ndarray:
-    if reward_kind == "log_return_after_costs":
-        return np.asarray(step_log_returns, dtype=np.float64)
-    raise ValueError(f"Unknown reward_kind: {reward_kind!r}")
 
 
 def simulate_portfolio(
@@ -146,11 +125,9 @@ def simulate_portfolio(
         w_prev = w_t
         equity[t + 1] = v
 
-    rewards = _reward_from_step_log_returns(step_log_returns, reward_kind=cfg.reward_kind)
     return PortfolioResult(
         equity=equity,
         step_log_returns=step_log_returns,
-        rewards=rewards,
         turnover=turnover,
         positions=w.copy(),
     )
