@@ -101,24 +101,19 @@ DistrubutionalFinanceRL/
 ## Setup
 
 1. Create a virtual environment (recommended):
-
-   ```bash
+  ```bash
    python -m venv .venv
    .venv\Scripts\activate   # Windows
    # source .venv/bin/activate   # Linux/macOS
-   ```
-
+  ```
 2. Install dependencies:
-
-   ```bash
+  ```bash
    pip install -r requirements.txt
-   ```
-
+  ```
 3. From the project root, run the experiment stub:
-
-   ```bash
+  ```bash
    python -m src.experiments.run_experiment
-   ```
+  ```
 
 ## Detailed Roadmap (Steps 1–12)
 
@@ -165,6 +160,7 @@ python -m src.data.split_dataset
 ```
 
 Expected outputs:
+
 - `data/raw/btc_daily.parquet`
 - `data/raw/btc_daily.csv`
 - `data/processed/btc_daily_features.parquet`
@@ -192,7 +188,7 @@ Expected outputs:
 - **Goal**: Implement a reproducible, deterministic offline environment wrapping the BTC dataset.
 - **Tasks**:
   - Implement `OfflineTradingEnv` in `src/env/offline_trading_env.py`:
-    - Observation at time \(t\): feature vector (and maybe current position).
+    - Observation at time t: feature vector (and maybe current position).
     - Action: integer in {0,1,2} mapped to short/flat/long in the portfolio module.
     - `step(action)` returns next observation, scalar reward, done flag, and info (e.g. current equity, drawdown).
     - Environment iterates sequentially over the preprocessed dataset (no on-the-fly data fetching).
@@ -206,7 +202,7 @@ Expected outputs:
   - Decide on a **behavior policy** that generates the offline data (e.g. buy-and-hold, random, or simple trend-following heuristic).
   - Implement `build_offline_dataset.py` in `src/data` that:
     - Runs the chosen behavior policy through `OfflineTradingEnv` over the training period.
-    - Stores transitions into a dataset / replay buffer format (e.g. `d3rlpy` `MDPDataset`) and saves to `data/processed/offline_dataset_*`.
+    - Stores transitions into a dataset / replay buffer format (e.g. `d3rlpy` `MDPDataset`) and saves to `data/processed/offline_dataset_`*.
   - Verify dataset statistics (action distribution, returns, etc.) in a notebook.
 
 ### Step 6: Baseline RL agents (non-distributional, non-risk-sensitive)
@@ -227,7 +223,7 @@ Expected outputs:
   - Use `d3rlpy`’s CQL implementation (if available) or implement a minimal CQL variant in `src/agents/cql.py`.
   - Add `train_cql.py` in `src/experiments` that:
     - Loads the same offline dataset.
-    - Trains CQL with tunable conservatism parameter \(\alpha\) and network architecture.
+    - Trains CQL with tunable conservatism parameter \alpha and network architecture.
     - Logs training loss, Q-value statistics, and conservatism behavior.
   - Add evaluation code common to all agents in `src/experiments/eval_policies.py`.
   - Compare CQL policy vs DQN baseline vs buy-and-hold.
@@ -237,11 +233,11 @@ Expected outputs:
 - **Goal**: Extend value estimation to model the full return distribution using quantile regression.
 - **Tasks**:
   - Implement a distributional Q-network in `src/agents/distributional_qnet.py`:
-    - Output \(N\) quantiles per action (e.g. 20–51 quantiles).
+    - Output N quantiles per action (e.g. 20–51 quantiles).
     - Use quantile Huber loss for training.
   - Integrate quantile outputs into CQL training to obtain a **distributional CQL** variant (or configure `d3rlpy` if it already supports distributional CQL-style algorithms).
   - Add `train_dist_cql.py` in `src/experiments` with hyperparameters:
-    - Number of quantiles, discount factor, \(\alpha\) for conservatism, learning rate, network size, etc.
+    - Number of quantiles, discount factor, \alpha for conservatism, learning rate, network size, etc.
   - Log and visualize estimated quantile functions over time/actions for interpretability.
 
 ### Step 9: Risk-sensitive policy from learned quantiles
@@ -250,7 +246,7 @@ Expected outputs:
 - **Tasks**:
   - Define risk-sensitive action selection rules in `src/agents/risk_policies.py`, for example:
     - Maximize a lower quantile (e.g. 10th or 20th percentile of return) instead of mean.
-    - Or maximize mean minus \(\lambda\) times a downside risk term (e.g. CVaR or lower-tail variance).
+    - Or maximize mean minus \lambda times a downside risk term (e.g. CVaR or lower-tail variance).
   - Implement a small evaluation harness that can plug different action selection functionals into the same trained distributional Q model.
   - Run controlled experiments comparing:
     - Mean-based greedy policy.
@@ -269,7 +265,7 @@ Expected outputs:
   - Implement plotting utilities in `src/experiments/plots.py` for:
     - Equity curves over time for each policy vs buy-and-hold.
     - Drawdown curves and distribution of period returns.
-    - Risk-return scatter plots across hyperparameter sweeps (e.g. different \(\alpha\) or risk-sensitive parameters).
+    - Risk-return scatter plots across hyperparameter sweeps (e.g. different \alpha or risk-sensitive parameters).
   - Create a main script `run_all.py` in `src/experiments` that can reproduce key experiments end-to-end.
 
 ### Step 11: Documentation, experiments log, and reproducibility
@@ -286,3 +282,4 @@ Expected outputs:
 - **Higher frequency data**: move from daily to hourly or sub-hourly, with attention to transaction costs and microstructure effects.
 - **Alternative risk measures**: experiment with downside deviation, drawdown-sensitive rewards, or utility-based objectives.
 - **Modeling choices**: compare different network architectures (e.g. temporal conv nets, transformers) for capturing long-range dependencies.
+

@@ -6,8 +6,13 @@ from .portfolio import (
     ACTION_SHORT,
     PortfolioConfig,
     PortfolioResult,
-    price_relative_from_log_return,
     simulate_portfolio,
+)
+
+from .offline_trading_env import (
+    EnvConfig,
+    N_ACTIONS,
+    OfflineTradingEnv,
 )
 
 __all__ = [
@@ -16,6 +21,8 @@ __all__ = [
     "ACTION_SHORT",
     "PortfolioConfig",
     "PortfolioResult",
-    "price_relative_from_log_return",
     "simulate_portfolio",
+    "EnvConfig",
+    "N_ACTIONS",
+    "OfflineTradingEnv",
 ]
