@@ -39,14 +39,12 @@ from .portfolio import (
 )
 
 # ---------------------------------------------------------------------------
-# Action mapping: Discrete(3) integers  →  signed positions
+# Action space: Discrete(3) with integers {0, 1, 2}
 # ---------------------------------------------------------------------------
-_ACTION_TO_POSITION: dict[int, int] = {
-    0: ACTION_SHORT,  # -1
-    1: ACTION_FLAT,   #  0
-    2: ACTION_LONG,   # +1
-}
-N_ACTIONS = len(_ACTION_TO_POSITION)
+# gymnasium.spaces.Discrete is always 0-indexed, and d3rlpy expects that.
+# To convert a gym action to a signed position:  position = action - 1
+#   0 → -1 (short)    1 → 0 (flat)    2 → +1 (long)
+N_ACTIONS = 3
 
 # ---------------------------------------------------------------------------
 # Columns that are metadata / targets, not features for the agent
@@ -244,8 +242,8 @@ class OfflineTradingEnv(gym.Env):
                 "Episode is over.  Call reset() before stepping again."
             )
 
-        # ── Map discrete action to signed position ───────────────────
-        new_position = float(_ACTION_TO_POSITION[int(action)])
+        # ── Map gym action {0,1,2} to signed position {-1,0,+1} ─────
+        new_position = float(int(action) - 1)
 
         # ── Transaction cost (same accounting as simulate_portfolio) ──
         turnover = abs(new_position - self._position)
