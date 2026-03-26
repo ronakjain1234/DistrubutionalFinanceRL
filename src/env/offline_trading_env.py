@@ -31,19 +31,13 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 
-from .portfolio import (
-    ACTION_FLAT,
-    ACTION_LONG,
-    ACTION_SHORT,
-    PortfolioConfig,
-)
+from .portfolio import PortfolioConfig
 
 # ---------------------------------------------------------------------------
-# Action space: Discrete(3) with integers {0, 1, 2}
+# Action space: Discrete(3, start=-1)  →  {-1, 0, +1}
 # ---------------------------------------------------------------------------
-# gymnasium.spaces.Discrete is always 0-indexed, and d3rlpy expects that.
-# To convert a gym action to a signed position:  position = action - 1
-#   0 → -1 (short)    1 → 0 (flat)    2 → +1 (long)
+# Actions match the signed positions in portfolio.py directly:
+#   -1 (short),  0 (flat),  +1 (long)
 N_ACTIONS = 3
 
 # ---------------------------------------------------------------------------
@@ -167,7 +161,7 @@ class OfflineTradingEnv(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32,
         )
-        self.action_space = gym.spaces.Discrete(N_ACTIONS)
+        self.action_space = gym.spaces.Discrete(N_ACTIONS, start=-1)
 
         # ── Episode state (set properly in reset()) ──────────────────
         self._t: int = 0
@@ -231,7 +225,7 @@ class OfflineTradingEnv(gym.Env):
         Parameters
         ----------
         action : int
-            0 = short, 1 = flat, 2 = long.
+            -1 = short, 0 = flat, +1 = long.
 
         Returns
         -------
@@ -242,8 +236,7 @@ class OfflineTradingEnv(gym.Env):
                 "Episode is over.  Call reset() before stepping again."
             )
 
-        # ── Map gym action {0,1,2} to signed position {-1,0,+1} ─────
-        new_position = float(int(action) - 1)
+        new_position = float(int(action))
 
         # ── Transaction cost (same accounting as simulate_portfolio) ──
         turnover = abs(new_position - self._position)
@@ -334,67 +327,3 @@ class OfflineTradingEnv(gym.Env):
             f"OfflineTradingEnv(data={self._cfg.data_path.name!r}, "
             f"rows={self._n_rows}, obs_dim={self.observation_space.shape[0]})"
         )
-
-
-# ---------------------------------------------------------------------------
-# Quick smoke-test when run as a script
-# ---------------------------------------------------------------------------
-
-def _smoke_test() -> None:
-    """
-    Run a random-policy rollout through the training split and print
-    summary statistics.  Useful for verifying the env works end-to-end.
-
-    Usage:  python -m src.env.offline_trading_env
-    """
-    import sys
-
-    train_path = Path("data/processed/btc_daily_train.parquet")
-    if not train_path.exists():
-        print(f"[smoke-test] {train_path} not found — run the data pipeline first.")
-        sys.exit(1)
-
-    cfg = EnvConfig(data_path=train_path)
-    env = OfflineTradingEnv(cfg)
-    print(f"Created: {env}")
-    print(f"  Observation space : {env.observation_space}")
-    print(f"  Action space      : {env.action_space}")
-    print(f"  Feature columns   : {env.feature_columns}")
-    print()
-
-    # Roll through the entire episode with random actions
-    obs, info = env.reset()
-    total_reward = 0.0
-    n_steps = 0
-
-    while True:
-        action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
-        n_steps += 1
-        if terminated or truncated:
-            break
-
-    print(f"  Episode length    : {n_steps} steps")
-    print(f"  Cumulative reward : {total_reward:+.6f}")
-    print(f"  Final equity      : {info['equity']:.6f}")
-    print(f"  Max drawdown      : {info['drawdown']:.4%}")
-    print()
-
-    # Also do a buy-and-hold rollout to cross-check with baselines.py
-    obs, _ = env.reset()
-    bnh_reward = 0.0
-    while True:
-        obs, reward, terminated, _, info = env.step(2)  # always long
-        bnh_reward += reward
-        if terminated:
-            break
-
-    print(f"  Buy-and-hold (env): cumulative log-return = {bnh_reward:+.6f}")
-    print(f"  Buy-and-hold (env): final equity          = {info['equity']:.6f}")
-    print()
-    print("[smoke-test] Done.")
-
-
-if __name__ == "__main__":
-    _smoke_test()
