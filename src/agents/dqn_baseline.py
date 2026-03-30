@@ -32,6 +32,7 @@ from typing import Literal
 
 import d3rlpy
 from d3rlpy.models.encoders import VectorEncoderFactory
+from d3rlpy.optimizers.optimizers import AdamFactory
 
 LOG = logging.getLogger(__name__)
 
@@ -47,34 +48,50 @@ class DQNBaselineConfig:
     """Which algorithm to use.  DoubleDQN reduces overestimation bias."""
 
     # ── Network architecture ──────────────────────────────────────────
-    hidden_units: list[int] = field(default_factory=lambda: [256, 256])
+    hidden_units: list[int] = field(default_factory=lambda: [128, 128])
     """Hidden layer sizes for the Q-network."""
 
     activation: str = "relu"
     """Activation function ('relu', 'tanh', etc.)."""
 
+    use_layer_norm: bool = True
+    """Apply layer normalisation after each hidden layer."""
+
+    dropout_rate: float | None = 0.1
+    """Dropout probability (None = no dropout)."""
+
     # ── Optimisation ──────────────────────────────────────────────────
     learning_rate: float = 3e-4
     """Adam learning rate."""
 
+    weight_decay: float = 1e-4
+    """L2 weight decay (AdamW-style)."""
+
+    clip_grad_norm: float | None = 1.0
+    """Max gradient norm for clipping (None = no clipping)."""
+
     batch_size: int = 256
     """Mini-batch size for gradient updates."""
 
-    gamma: float = 0.99
-    """Discount factor."""
+    gamma: float = 0.95
+    """Discount factor (lower = less Q-value error accumulation)."""
 
-    n_critics: int = 1
-    """Number of Q-networks (>1 gives ensemble, but 1 is standard DQN)."""
+    n_critics: int = 3
+    """Number of Q-networks (ensemble averages out overestimation)."""
 
     target_update_interval: int = 1000
     """Steps between hard target-network updates."""
 
     # ── Training budget ───────────────────────────────────────────────
-    n_steps: int = 50_000
+    n_steps: int = 20_000
     """Total gradient steps."""
 
-    n_steps_per_epoch: int = 5_000
-    """Steps per epoch (controls logging / checkpoint frequency)."""
+    n_steps_per_epoch: int = 2_000
+    """Steps per epoch (controls logging / checkpoint / early-stop granularity)."""
+
+    # ── Early stopping ────────────────────────────────────────────────
+    early_stopping_patience: int = 3
+    """Stop if val Sharpe doesn't improve for this many epochs (0 = disabled)."""
 
     # ── Device ────────────────────────────────────────────────────────
     device: str | None = None
@@ -110,10 +127,18 @@ def create_dqn(cfg: DQNBaselineConfig | None = None) -> d3rlpy.algos.QLearningAl
     encoder = VectorEncoderFactory(
         hidden_units=cfg.hidden_units,
         activation=cfg.activation,
+        use_layer_norm=cfg.use_layer_norm,
+        dropout_rate=cfg.dropout_rate,
+    )
+
+    optim = AdamFactory(
+        weight_decay=cfg.weight_decay,
+        clip_grad_norm=cfg.clip_grad_norm,
     )
 
     common = dict(
         learning_rate=cfg.learning_rate,
+        optim_factory=optim,
         batch_size=cfg.batch_size,
         gamma=cfg.gamma,
         n_critics=cfg.n_critics,
@@ -128,9 +153,12 @@ def create_dqn(cfg: DQNBaselineConfig | None = None) -> d3rlpy.algos.QLearningAl
 
     algo = algo_cfg.create(device=device)
     LOG.info(
-        "Created %s  (device=%s, hidden=%s, lr=%s, batch=%d, gamma=%.3f)",
+        "Created %s  (device=%s, hidden=%s, lr=%s, batch=%d, gamma=%.3f, "
+        "dropout=%.2f, layer_norm=%s, weight_decay=%s, clip_grad=%.1f, n_critics=%d)",
         cfg.algo.upper(), device, cfg.hidden_units,
         cfg.learning_rate, cfg.batch_size, cfg.gamma,
+        cfg.dropout_rate or 0.0, cfg.use_layer_norm,
+        cfg.weight_decay, cfg.clip_grad_norm or 0.0, cfg.n_critics,
     )
     return algo
 

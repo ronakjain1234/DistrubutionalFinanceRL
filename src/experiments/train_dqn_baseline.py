@@ -21,6 +21,7 @@ The script:
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import sys
 from pathlib import Path
@@ -29,7 +30,10 @@ import numpy as np
 
 from src.data.build_offline_dataset import load_offline_dataset, to_d3rlpy_dataset
 from src.agents.dqn_baseline import DQNBaselineConfig, create_dqn, save_model
-from src.experiments.eval_policies import evaluate_on_splits
+from src.experiments.eval_policies import (
+    evaluate_on_splits,
+    rollout_policy,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -49,15 +53,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # Network
     p.add_argument(
-        "--hidden", type=int, nargs="+", default=[256, 256],
-        help="Hidden layer sizes (default: 256 256).",
+        "--hidden", type=int, nargs="+", default=[128, 128],
+        help="Hidden layer sizes (default: 128 128).",
     )
     p.add_argument("--activation", default="relu", help="Activation function.")
+    p.add_argument(
+        "--dropout", type=float, default=0.1,
+        help="Dropout rate (0 = disabled, default: 0.1).",
+    )
+    p.add_argument(
+        "--no_layer_norm", action="store_true",
+        help="Disable layer normalisation.",
+    )
 
     # Optimisation
     p.add_argument("--lr", type=float, default=3e-4, help="Learning rate.")
     p.add_argument("--batch_size", type=int, default=256, help="Batch size.")
-    p.add_argument("--gamma", type=float, default=0.99, help="Discount factor.")
+    p.add_argument(
+        "--gamma", type=float, default=0.95,
+        help="Discount factor (default: 0.95).",
+    )
+    p.add_argument(
+        "--weight_decay", type=float, default=1e-4,
+        help="L2 weight decay (default: 1e-4).",
+    )
+    p.add_argument(
+        "--clip_grad_norm", type=float, default=1.0,
+        help="Max gradient norm (0 = disabled, default: 1.0).",
+    )
+    p.add_argument(
+        "--n_critics", type=int, default=3,
+        help="Number of Q-network ensemble members (default: 3).",
+    )
     p.add_argument(
         "--target_update", type=int, default=1000,
         help="Target network update interval (steps).",
@@ -65,12 +92,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # Training budget
     p.add_argument(
-        "--n_steps", type=int, default=50_000,
-        help="Total gradient steps.",
+        "--n_steps", type=int, default=20_000,
+        help="Total gradient steps (default: 20000).",
     )
     p.add_argument(
-        "--n_steps_per_epoch", type=int, default=5_000,
-        help="Steps per epoch (logging frequency).",
+        "--n_steps_per_epoch", type=int, default=2_000,
+        help="Steps per epoch (default: 2000).",
+    )
+
+    # Early stopping
+    p.add_argument(
+        "--patience", type=int, default=3,
+        help="Early-stop patience in epochs (0 = disabled, default: 3).",
     )
 
     # Data
@@ -89,6 +122,60 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     return p.parse_args(argv)
+
+
+# ── Early-stopping callback ──────────────────────────────────────────────
+
+class _EarlyStopState:
+    """Tracks validation Sharpe across epochs for early stopping."""
+
+    def __init__(self, patience: int, save_dir: Path):
+        self.patience = patience
+        self.save_dir = save_dir
+        self.best_sharpe: float = -float("inf")
+        self.epochs_without_improvement: int = 0
+        self.best_epoch: int = 0
+        self.should_stop: bool = False
+
+    def check(self, algo: object, epoch: int, total_step: int) -> None:
+        """epoch_callback compatible with d3rlpy .fit()."""
+        from src.experiments.eval_policies import rollout_policy
+
+        val_path = Path("data/processed/btc_daily_val.parquet")
+        if not val_path.is_file():
+            return
+
+        result = rollout_policy(
+            algo,  # type: ignore[arg-type]
+            data_path=val_path,
+            split_name="val",
+            d3rlpy_actions=True,
+        )
+        sharpe = result.metrics["sharpe"]
+        ret = result.metrics["total_return"]
+
+        LOG.info(
+            "Epoch %d (step %d) — val Sharpe=%.4f  return=%.4f  (best=%.4f @ epoch %d)",
+            epoch, total_step, sharpe, ret, self.best_sharpe, self.best_epoch,
+        )
+
+        if sharpe > self.best_sharpe:
+            self.best_sharpe = sharpe
+            self.best_epoch = epoch
+            self.epochs_without_improvement = 0
+            # Save best checkpoint
+            best_path = self.save_dir / "model_best.d3"
+            best_path.parent.mkdir(parents=True, exist_ok=True)
+            algo.save(str(best_path))  # type: ignore[union-attr]
+            LOG.info("  New best model saved → %s", best_path)
+        else:
+            self.epochs_without_improvement += 1
+            if self.patience > 0 and self.epochs_without_improvement >= self.patience:
+                LOG.info(
+                    "  Early stopping triggered: %d epochs without improvement.",
+                    self.epochs_without_improvement,
+                )
+                self.should_stop = True
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
@@ -117,20 +204,29 @@ def main(argv: list[str] | None = None) -> None:
         algo=args.algo,
         hidden_units=args.hidden,
         activation=args.activation,
+        use_layer_norm=not args.no_layer_norm,
+        dropout_rate=args.dropout if args.dropout > 0 else None,
         learning_rate=args.lr,
+        weight_decay=args.weight_decay,
+        clip_grad_norm=args.clip_grad_norm if args.clip_grad_norm > 0 else None,
         batch_size=args.batch_size,
         gamma=args.gamma,
+        n_critics=args.n_critics,
         target_update_interval=args.target_update,
         n_steps=args.n_steps,
         n_steps_per_epoch=args.n_steps_per_epoch,
+        early_stopping_patience=args.patience,
         device=args.device,
         save_dir=Path(args.save_dir),
     )
 
     algo = create_dqn(cfg)
 
-    # ── 3. Train ──────────────────────────────────────────────────────
+    # ── 3. Train (with best-checkpoint tracking) ────────────────────────
     LOG.info("Starting training: %d steps ...", cfg.n_steps)
+
+    es = _EarlyStopState(cfg.early_stopping_patience, cfg.save_dir)
+
     algo.fit(
         dataset,
         n_steps=cfg.n_steps,
@@ -138,27 +234,39 @@ def main(argv: list[str] | None = None) -> None:
         experiment_name="dqn_baseline",
         show_progress=True,
         logging_steps=500,
+        epoch_callback=es.check,
     )
     LOG.info("Training complete.")
 
-    # ── 4. Save model ─────────────────────────────────────────────────
+    # ── 4. Save final model ───────────────────────────────────────────
     save_path = cfg.save_dir / "model.d3"
     save_model(algo, save_path)
 
-    # ── 5. Evaluate on val / test vs buy-and-hold ─────────────────────
+    # ── 5. Load best model for evaluation (if early stopping saved one)
+    best_path = cfg.save_dir / "model_best.d3"
+    if best_path.exists():
+        LOG.info("Loading best checkpoint (epoch %d) for evaluation.", es.best_epoch)
+        from src.agents.dqn_baseline import load_model
+        eval_algo = load_model(best_path, cfg.device)
+        label = f"{cfg.algo.upper()} (best@ep{es.best_epoch})"
+    else:
+        eval_algo = algo
+        label = cfg.algo.upper()
+
+    # ── 6. Evaluate on val / test vs buy-and-hold ─────────────────────
     results = evaluate_on_splits(
-        algo,
-        policy_name=cfg.algo.upper(),
+        eval_algo,
+        policy_name=label,
         d3rlpy_actions=True,
         verbose=True,
     )
 
-    # ── 6. Quick summary ──────────────────────────────────────────────
+    # ── 7. Quick summary ──────────────────────────────────────────────
     for split_name, result in results.items():
         m = result.metrics
         LOG.info(
             "%s %s: return=%.4f  sharpe=%.4f  maxDD=%.4f  actions=[S:%.0f%% F:%.0f%% L:%.0f%%]",
-            cfg.algo.upper(),
+            label,
             split_name,
             m["total_return"],
             m["sharpe"],

@@ -1,0 +1,67 @@
+{
+  "observation_shape": [
+    18
+  ],
+  "action_size": 3,
+  "config": {
+    "type": "double_dqn",
+    "params": {
+      "batch_size": 256,
+      "gamma": 0.95,
+      "observation_scaler": {
+        "type": "none",
+        "params": {}
+      },
+      "action_scaler": {
+        "type": "none",
+        "params": {}
+      },
+      "reward_scaler": {
+        "type": "none",
+        "params": {}
+      },
+      "compile_graph": false,
+      "learning_rate": 0.0003,
+      "optim_factory": {
+        "type": "adam",
+        "params": {
+          "clip_grad_norm": 1.0,
+          "lr_scheduler_factory": {
+            "type": "none",
+            "params": {}
+          },
+          "betas": [
+            0.9,
+            0.999
+          ],
+          "eps": 1e-08,
+          "weight_decay": 0.0001,
+          "amsgrad": false
+        }
+      },
+      "encoder_factory": {
+        "type": "vector",
+        "params": {
+          "hidden_units": [
+            128,
+            128
+          ],
+          "activation": "relu",
+          "use_batch_norm": false,
+          "use_layer_norm": true,
+          "dropout_rate": 0.1,
+          "exclude_last_activation": false,
+          "last_activation": null
+        }
+      },
+      "q_func_factory": {
+        "type": "mean",
+        "params": {
+          "share_encoder": false
+        }
+      },
+      "n_critics": 3,
+      "target_update_interval": 1000
+    }
+  }
+}
