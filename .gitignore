@@ -29,3 +29,7 @@ Thumbs.db
 .vscode/
 .idea/
 
+.claude/
+
+## d3rlpy training logs
+d3rlpy_logs/
