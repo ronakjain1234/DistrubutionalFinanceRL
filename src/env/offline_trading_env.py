@@ -45,7 +45,7 @@ N_ACTIONS = 3
 # ---------------------------------------------------------------------------
 _NON_FEATURE_COLS = frozenset({
     "timestamp", "open", "high", "low", "close",
-    "next_close", "volume", "log_return_next_1d",
+    "next_close", "volume", "log_return_next_1d", "log_return_next_1h",
 })
 
 

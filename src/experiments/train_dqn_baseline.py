@@ -111,6 +111,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dataset", default="data/processed/offline_dataset_train.npz",
         help="Path to offline dataset.",
     )
+    p.add_argument(
+        "--val_path", default="data/processed/btc_daily_val.parquet",
+        help="Validation split parquet (for early stopping).",
+    )
+    p.add_argument(
+        "--log_return_column", default="log_return_next_1d",
+        help="Forward return column name (log_return_next_1d or log_return_next_1h).",
+    )
+    p.add_argument(
+        "--periods_per_year", type=int, default=252,
+        help="Periods per year for annualization (252=daily, 8760=hourly).",
+    )
 
     # Device
     p.add_argument("--device", default=None, help="PyTorch device (auto if omitted).")
@@ -129,9 +141,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 class _EarlyStopState:
     """Tracks validation Sharpe across epochs for early stopping."""
 
-    def __init__(self, patience: int, save_dir: Path):
+    def __init__(
+        self,
+        patience: int,
+        save_dir: Path,
+        val_path: str | Path = "data/processed/btc_daily_val.parquet",
+        log_return_column: str = "log_return_next_1d",
+        periods_per_year: int = 252,
+    ):
         self.patience = patience
         self.save_dir = save_dir
+        self.val_path = Path(val_path)
+        self.log_return_column = log_return_column
+        self.periods_per_year = periods_per_year
         self.best_sharpe: float = -float("inf")
         self.epochs_without_improvement: int = 0
         self.best_epoch: int = 0
@@ -141,15 +163,16 @@ class _EarlyStopState:
         """epoch_callback compatible with d3rlpy .fit()."""
         from src.experiments.eval_policies import rollout_policy
 
-        val_path = Path("data/processed/btc_daily_val.parquet")
-        if not val_path.is_file():
+        if not self.val_path.is_file():
             return
 
         result = rollout_policy(
             algo,  # type: ignore[arg-type]
-            data_path=val_path,
+            data_path=self.val_path,
             split_name="val",
             d3rlpy_actions=True,
+            log_return_column=self.log_return_column,
+            periods_per_year=self.periods_per_year,
         )
         sharpe = result.metrics["sharpe"]
         ret = result.metrics["total_return"]
@@ -225,7 +248,13 @@ def main(argv: list[str] | None = None) -> None:
     # ── 3. Train (with best-checkpoint tracking) ────────────────────────
     LOG.info("Starting training: %d steps ...", cfg.n_steps)
 
-    es = _EarlyStopState(cfg.early_stopping_patience, cfg.save_dir)
+    es = _EarlyStopState(
+        cfg.early_stopping_patience,
+        cfg.save_dir,
+        val_path=args.val_path,
+        log_return_column=args.log_return_column,
+        periods_per_year=args.periods_per_year,
+    )
 
     algo.fit(
         dataset,

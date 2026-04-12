@@ -97,9 +97,12 @@ class TrendFollowingPolicy(BehaviorPolicy):
         self,
         feature_columns: list[str],
         threshold: float = 0.0,
+        *,
+        momentum_feature: str = "log_ret_5",
+        ma_feature: str = "ma_ratio_20",
     ) -> None:
-        self._mom_idx = _feature_index(feature_columns, "log_ret_5")
-        self._ma_idx = _feature_index(feature_columns, "ma_ratio_20")
+        self._mom_idx = _feature_index(feature_columns, momentum_feature)
+        self._ma_idx = _feature_index(feature_columns, ma_feature)
         self._thr = threshold
 
     def select_action(self, obs: np.ndarray) -> int:
@@ -125,9 +128,12 @@ class MeanReversionPolicy(BehaviorPolicy):
         self,
         feature_columns: list[str],
         rsi_threshold: float = 0.5,
+        *,
+        rsi_feature: str = "rsi_14",
+        ma_feature: str = "ma_ratio_20",
     ) -> None:
-        self._rsi_idx = _feature_index(feature_columns, "rsi_14")
-        self._ma_idx = _feature_index(feature_columns, "ma_ratio_20")
+        self._rsi_idx = _feature_index(feature_columns, rsi_feature)
+        self._ma_idx = _feature_index(feature_columns, ma_feature)
         self._thr = rsi_threshold
 
     def select_action(self, obs: np.ndarray) -> int:
@@ -230,9 +236,12 @@ class VolatilityRegimePolicy(BehaviorPolicy):
         self,
         feature_columns: list[str],
         vol_threshold: float = 0.5,
+        *,
+        vol_feature: str = "vol_20",
+        momentum_feature: str = "log_ret_20",
     ) -> None:
-        self._vol_idx = _feature_index(feature_columns, "vol_20")
-        self._mom_idx = _feature_index(feature_columns, "log_ret_20")
+        self._vol_idx = _feature_index(feature_columns, vol_feature)
+        self._mom_idx = _feature_index(feature_columns, momentum_feature)
         self._thr = vol_threshold
 
     def select_action(self, obs: np.ndarray) -> int:

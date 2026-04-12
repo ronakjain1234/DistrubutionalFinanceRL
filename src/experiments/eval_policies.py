@@ -77,6 +77,8 @@ def rollout_policy(
     split_name: str = "split",
     portfolio_cfg: PortfolioConfig | None = None,
     d3rlpy_actions: bool = True,
+    log_return_column: str = "log_return_next_1d",
+    periods_per_year: int = 252,
 ) -> RolloutResult:
     """
     Roll out *policy* through the offline trading environment on one split.
@@ -100,6 +102,7 @@ def rollout_policy(
     env_cfg = EnvConfig(
         data_path=Path(data_path),
         portfolio_cfg=portfolio_cfg or PortfolioConfig(),
+        log_return_column=log_return_column,
     )
     env = OfflineTradingEnv(env_cfg)
 
@@ -136,7 +139,7 @@ def rollout_policy(
     log_ret_arr = np.array(log_rets, dtype=np.float32)
     n_steps = len(log_rets)
 
-    m = equity_metrics(equity_arr, log_ret_arr)
+    m = equity_metrics(equity_arr, log_ret_arr, periods_per_year=periods_per_year)
 
     # Action distribution for logging
     act_arr = np.array(actions_list, dtype=np.int64)
@@ -174,6 +177,8 @@ def compare_to_buy_and_hold(
     rollout: RolloutResult,
     policy_name: str = "DQN",
     portfolio_cfg: PortfolioConfig | None = None,
+    log_return_column: str = "log_return_next_1d",
+    periods_per_year: int = 252,
 ) -> list[ComparisonRow]:
     """
     Return a two-row comparison: [policy, buy-and-hold] on the same split.
@@ -182,6 +187,8 @@ def compare_to_buy_and_hold(
         rollout.source_path,
         split_name=rollout.split_name,
         portfolio_cfg=portfolio_cfg,
+        log_return_column=log_return_column,
+        periods_per_year=periods_per_year,
     )
     return [
         ComparisonRow(policy_name, rollout.split_name, rollout.metrics),
@@ -238,6 +245,8 @@ def evaluate_on_splits(
     portfolio_cfg: PortfolioConfig | None = None,
     d3rlpy_actions: bool = True,
     verbose: bool = True,
+    log_return_column: str = "log_return_next_1d",
+    periods_per_year: int = 252,
 ) -> dict[str, RolloutResult]:
     """
     Evaluate *policy* on multiple data splits and optionally print comparisons.
@@ -267,10 +276,16 @@ def evaluate_on_splits(
             split_name=split_name,
             portfolio_cfg=portfolio_cfg,
             d3rlpy_actions=d3rlpy_actions,
+            log_return_column=log_return_column,
+            periods_per_year=periods_per_year,
         )
         results[split_name] = result
         all_rows.extend(
-            compare_to_buy_and_hold(result, policy_name, portfolio_cfg)
+            compare_to_buy_and_hold(
+                result, policy_name, portfolio_cfg,
+                log_return_column=log_return_column,
+                periods_per_year=periods_per_year,
+            )
         )
 
     if verbose and all_rows:

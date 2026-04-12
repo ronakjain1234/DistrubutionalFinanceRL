@@ -12,14 +12,29 @@ _DEFAULT_LOG_RET_WINDOWS: Final[list[int]] = [1, 5, 20]
 _DEFAULT_VOL_WINDOWS: Final[list[int]] = [5, 20]
 _DEFAULT_MA_WINDOWS: Final[list[int]] = [10, 20, 50]
 
+# Hourly-specific window sizes
+_HOURLY_LOG_RET_WINDOWS: Final[list[int]] = [1, 4, 24, 168]  # 1h, 4h, 1d, 1w
+_HOURLY_VOL_WINDOWS: Final[list[int]] = [24, 168]             # 1d, 1w
+_HOURLY_MA_WINDOWS: Final[list[int]] = [24, 72, 168]          # 1d, 3d, 1w
+
 # Supply / demand zone detection parameters (tuned for daily BTC)
 _SD_PIVOT_ORDER: Final[int] = 5        # bars on each side to confirm a pivot
 _SD_CONFIRM_BARS: Final[int] = 5       # bars after pivot to measure impulse
 _SD_IMPULSE_PCT: Final[float] = 0.05   # 5 % move confirms a zone (crypto-scale)
 _SD_LOOKBACK: Final[int] = 60          # ~3 months of active zone memory
 _SD_PROXIMITY_PCT: Final[float] = 0.03 # within 3 % of zone = "near"
+
+# S/D zone parameters tuned for hourly BTC
+_SD_HOURLY_PIVOT_ORDER: Final[int] = 12     # 12 hours on each side
+_SD_HOURLY_CONFIRM_BARS: Final[int] = 24    # 24 hours to confirm impulse
+_SD_HOURLY_IMPULSE_PCT: Final[float] = 0.03 # 3% move (hourly has smaller swings)
+_SD_HOURLY_LOOKBACK: Final[int] = 720       # ~30 days of active zone memory
+_SD_HOURLY_PROXIMITY_PCT: Final[float] = 0.02  # within 2% of zone
+
 RAW_PATH: Final[str] = "data/raw/btc_daily.parquet"
 OUT_PATH: Final[str] = "data/processed/btc_daily_features.parquet"
+HOURLY_RAW_PATH: Final[str] = "data/raw/btc_hourly.parquet"
+HOURLY_OUT_PATH: Final[str] = "data/processed/btc_hourly_features.parquet"
 
 
 def _compute_rsi(close, period=14):
@@ -37,7 +52,15 @@ def _compute_rsi(close, period=14):
     return rsi
 
 
-def _supply_demand_features(close_arr: np.ndarray) -> dict[str, np.ndarray]:
+def _supply_demand_features(
+    close_arr: np.ndarray,
+    *,
+    order: int = _SD_PIVOT_ORDER,
+    confirm: int = _SD_CONFIRM_BARS,
+    impulse: float = _SD_IMPULSE_PCT,
+    lookback: int = _SD_LOOKBACK,
+    proximity: float = _SD_PROXIMITY_PCT,
+) -> dict[str, np.ndarray]:
     """
     Detect supply and demand zones from raw close prices and compute
     per-bar proximity features.
@@ -70,12 +93,6 @@ def _supply_demand_features(close_arr: np.ndarray) -> dict[str, np.ndarray]:
     """
     n = len(close_arr)
     c = close_arr
-
-    order = _SD_PIVOT_ORDER
-    confirm = _SD_CONFIRM_BARS
-    impulse = _SD_IMPULSE_PCT
-    lookback = _SD_LOOKBACK
-    proximity = _SD_PROXIMITY_PCT
 
     # ── Step 1: find all pivot lows / highs ────────────────────────────
     demand_zones: list[tuple[int, float]] = []   # (bar_index, price_level)
@@ -206,6 +223,128 @@ def _make_features(df):
     return df, feature_cols
 
 
+def _make_hourly_features(df):
+    """Build feature panel from hourly OHLCV data.
+
+    Returns (df_with_features, feature_col_names). Adds ~27 features:
+    - Rolling log returns at 1h, 4h, 24h, 168h (1 week)
+    - Realized volatility at 24h, 168h
+    - MA momentum ratios at 24h, 72h, 168h
+    - RSI-14 (14 hours), MACD (12/26/9 hours)
+    - Log volume and volume change
+    - Calendar encodings: hour_sin, hour_cos, dow_sin, dow_cos
+    - vol_ratio (24h/168h), volume_ratio_24h (vol/SMA_24)
+    - Return autocorrelation at lags 1, 4, 24
+    - Supply/demand zone features (hourly-tuned)
+    - Target: log_return_next_1h
+    """
+    df = df.sort_values("timestamp").reset_index(drop=True).copy()
+
+    close = df["close"]
+    volume = df["volume"]
+    log_close = np.log(close.replace(0, np.nan))
+    log_ret_1h = log_close.diff()
+
+    # Rolling log returns
+    for w in _HOURLY_LOG_RET_WINDOWS:
+        df[f"log_ret_{w}"] = log_ret_1h.rolling(w).sum()
+
+    # Realized volatility
+    for w in _HOURLY_VOL_WINDOWS:
+        df[f"vol_{w}"] = log_ret_1h.rolling(w).std(ddof=0)
+
+    # MA momentum ratios
+    for w in _HOURLY_MA_WINDOWS:
+        sma = close.rolling(w).mean()
+        df[f"ma_ratio_{w}"] = close / sma - 1.0
+
+    # RSI-14 (14 hours)
+    df["rsi_14"] = _compute_rsi(close, period=14)
+
+    # MACD (12/26/9 hour EMAs)
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+    macd = ema12 - ema26
+    signal = macd.ewm(span=9, adjust=False).mean()
+    df["macd"] = macd
+    df["macd_signal"] = signal
+    df["macd_hist"] = macd - signal
+
+    # Volume features
+    df["log_volume"] = np.log1p(volume.clip(lower=0))
+    df["log_volume_change_1"] = df["log_volume"].diff()
+
+    # ── Hourly-specific alpha features ────────────────────────────────
+
+    # Calendar encodings (cyclical)
+    hour_of_day = df["timestamp"].dt.hour
+    day_of_week = df["timestamp"].dt.dayofweek
+    df["hour_sin"] = np.sin(2 * np.pi * hour_of_day / 24)
+    df["hour_cos"] = np.cos(2 * np.pi * hour_of_day / 24)
+    df["dow_sin"] = np.sin(2 * np.pi * day_of_week / 7)
+    df["dow_cos"] = np.cos(2 * np.pi * day_of_week / 7)
+
+    # Volatility ratio: short-term / long-term realized vol
+    vol_24 = log_ret_1h.rolling(24).std(ddof=0)
+    vol_168 = log_ret_1h.rolling(168).std(ddof=0)
+    df["vol_ratio"] = vol_24 / vol_168.replace(0, np.nan)
+
+    # Volume ratio: current volume vs 24h SMA
+    vol_sma_24 = volume.rolling(24).mean()
+    df["volume_ratio_24h"] = volume / vol_sma_24.replace(0, np.nan)
+
+    # Return autocorrelation at lags 1, 4, 24 (rolling 48h window)
+    for lag in [1, 4, 24]:
+        lagged = log_ret_1h.shift(lag)
+        df[f"ret_autocorr_{lag}"] = (
+            log_ret_1h.rolling(48).corr(lagged)
+        )
+
+    # Supply / demand zone features (hourly-tuned parameters)
+    sd = _supply_demand_features(
+        close.to_numpy(dtype=np.float64),
+        order=_SD_HOURLY_PIVOT_ORDER,
+        confirm=_SD_HOURLY_CONFIRM_BARS,
+        impulse=_SD_HOURLY_IMPULSE_PCT,
+        lookback=_SD_HOURLY_LOOKBACK,
+        proximity=_SD_HOURLY_PROXIMITY_PCT,
+    )
+    for col_name, arr in sd.items():
+        df[col_name] = arr
+
+    # Next-step target: 1-hour forward log return
+    df["next_close"] = df["close"].shift(-1)
+    df["log_return_next_1h"] = (np.log(df["next_close"]) - np.log(df["close"])).astype(float)
+
+    feature_cols = (
+        [f"log_ret_{w}" for w in _HOURLY_LOG_RET_WINDOWS]
+        + [f"vol_{w}" for w in _HOURLY_VOL_WINDOWS]
+        + [f"ma_ratio_{w}" for w in _HOURLY_MA_WINDOWS]
+        + [
+            "rsi_14",
+            "macd",
+            "macd_signal",
+            "macd_hist",
+            "log_volume",
+            "log_volume_change_1",
+            "hour_sin",
+            "hour_cos",
+            "dow_sin",
+            "dow_cos",
+            "vol_ratio",
+            "volume_ratio_24h",
+            "ret_autocorr_1",
+            "ret_autocorr_4",
+            "ret_autocorr_24",
+            "sd_dist_demand",
+            "sd_dist_supply",
+            "sd_zone_signal",
+        ]
+    )
+
+    return df, feature_cols
+
+
 @dataclass(frozen=True)
 class FeatureConfig:
     raw_path: Path = Path(RAW_PATH)
@@ -230,10 +369,48 @@ def make_feature_panel(cfg: FeatureConfig):
     return cfg.out_path
 
 
+@dataclass(frozen=True)
+class HourlyFeatureConfig:
+    raw_path: Path = Path(HOURLY_RAW_PATH)
+    out_path: Path = Path(HOURLY_OUT_PATH)
+
+
+def make_hourly_feature_panel(cfg: HourlyFeatureConfig):
+    if not cfg.raw_path.exists():
+        raise FileNotFoundError(f"Raw hourly input not found: {cfg.raw_path}")
+
+    df = pd.read_parquet(cfg.raw_path)
+    expected = {"timestamp", "open", "high", "low", "close", "volume"}
+    missing = expected.difference(set(df.columns))
+    if missing:
+        raise RuntimeError(f"Raw BTC hourly parquet missing columns: {sorted(missing)}")
+
+    out_df, _ = _make_hourly_features(df)
+    cfg.out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_df.to_parquet(cfg.out_path, index=False)
+
+    print(f"Wrote BTC hourly feature panel to {cfg.out_path}  ({len(out_df)} rows)")
+    return cfg.out_path
+
+
 def main():
-    cfg = FeatureConfig()
-    out_path = make_feature_panel(cfg)
-    print(f"Wrote BTC daily features: {out_path}")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build BTC feature panel")
+    parser.add_argument(
+        "--frequency", choices=["daily", "hourly"], default="daily",
+        help="Feature frequency to build (default: daily)",
+    )
+    args = parser.parse_args()
+
+    if args.frequency == "hourly":
+        cfg = HourlyFeatureConfig()
+        out_path = make_hourly_feature_panel(cfg)
+        print(f"Wrote BTC hourly features: {out_path}")
+    else:
+        cfg = FeatureConfig()
+        out_path = make_feature_panel(cfg)
+        print(f"Wrote BTC daily features: {out_path}")
 
 
 if __name__ == "__main__":

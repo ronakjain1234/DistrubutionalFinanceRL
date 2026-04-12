@@ -13,7 +13,9 @@
       "Bash(find /c/Users/ronak/DistrubutionalFinanceRL -type d -not -path */.*)",
       "Bash(grep -E \"\\\\.py$|src|data\")",
       "Bash(xargs grep:*)",
-      "Bash(.venv/Scripts/python.exe:*)"
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Read(//home/ronak/**)",
+      "Bash(python3)"
     ]
   },
   "disabledMcpjsonServers": [

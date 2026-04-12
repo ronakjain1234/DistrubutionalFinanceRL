@@ -127,6 +127,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--val_path", default="data/processed/btc_daily_val.parquet",
         help="Validation split parquet (for early stopping and Q-stats).",
     )
+    p.add_argument(
+        "--log_return_column", default="log_return_next_1d",
+        help="Forward return column name (log_return_next_1d or log_return_next_1h).",
+    )
+    p.add_argument(
+        "--periods_per_year", type=int, default=252,
+        help="Periods per year for annualization (252=daily, 8760=hourly).",
+    )
 
     # Device
     p.add_argument("--device", default=None, help="PyTorch device (auto if omitted).")
@@ -219,6 +227,8 @@ class _TrainingDiagnostics:
     save_dir: Path
     val_observations: np.ndarray
     val_path: Path
+    log_return_column: str = "log_return_next_1d"
+    periods_per_year: int = 252
 
     best_sharpe: float = field(default=-float("inf"))
     best_epoch: int = 0
@@ -238,6 +248,8 @@ class _TrainingDiagnostics:
             data_path=self.val_path,
             split_name="val",
             d3rlpy_actions=True,
+            log_return_column=self.log_return_column,
+            periods_per_year=self.periods_per_year,
         )
         sharpe = result.metrics["sharpe"]
         ret = result.metrics["total_return"]
@@ -380,6 +392,8 @@ def main(argv: list[str] | None = None) -> None:
         save_dir=cfg.save_dir,
         val_observations=val_obs,
         val_path=val_path,
+        log_return_column=args.log_return_column,
+        periods_per_year=args.periods_per_year,
     )
 
     # ── 4. Train ──────────────────────────────────────────────────────
@@ -421,6 +435,8 @@ def main(argv: list[str] | None = None) -> None:
         policy_name=label,
         d3rlpy_actions=True,
         verbose=True,
+        log_return_column=args.log_return_column,
+        periods_per_year=args.periods_per_year,
     )
 
     # ── 8. Optional side-by-side comparison with DQN baseline ────────
@@ -434,6 +450,8 @@ def main(argv: list[str] | None = None) -> None:
                 policy_name="DQN (baseline)",
                 d3rlpy_actions=True,
                 verbose=True,
+                log_return_column=args.log_return_column,
+                periods_per_year=args.periods_per_year,
             )
         except Exception as e:  # noqa: BLE001
             LOG.warning("Could not evaluate DQN baseline: %s", e)

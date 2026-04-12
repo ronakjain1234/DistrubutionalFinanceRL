@@ -19,6 +19,13 @@ DEFAULT_TRAIN = Path("data/processed/btc_daily_train.parquet")
 DEFAULT_VAL = Path("data/processed/btc_daily_val.parquet")
 DEFAULT_TEST = Path("data/processed/btc_daily_test.parquet")
 
+# Hourly paths
+HOURLY_TRAIN = Path("data/processed/btc_hourly_train.parquet")
+HOURLY_VAL = Path("data/processed/btc_hourly_val.parquet")
+HOURLY_TEST = Path("data/processed/btc_hourly_test.parquet")
+
+PERIODS_PER_YEAR_HOURLY = 8760  # 365 * 24
+
 
 @dataclass(frozen=True)
 class BuyAndHoldReport:
@@ -92,6 +99,7 @@ def run_buy_and_hold_on_split(
     portfolio_cfg: PortfolioConfig | None = None,
     log_return_column: str = "log_return_next_1d",
     timestamp_column: str = "timestamp",
+    periods_per_year: int = 252,
 ) -> BuyAndHoldReport:
     """
     Evaluate always-long BTC on one processed feature split.
@@ -121,7 +129,7 @@ def run_buy_and_hold_on_split(
 
     ts = sub[timestamp_column].reset_index(drop=True)
 
-    m = equity_metrics(result.equity, result.step_log_returns)
+    m = equity_metrics(result.equity, result.step_log_returns, periods_per_year=periods_per_year)
     return BuyAndHoldReport(
         split_name=split_name,
         source_path=path.resolve(),
@@ -152,6 +160,27 @@ def run_buy_and_hold_all_splits(
     return out
 
 
+def run_buy_and_hold_all_splits_hourly(
+    *,
+    train_path: Path = HOURLY_TRAIN,
+    val_path: Path = HOURLY_VAL,
+    test_path: Path = HOURLY_TEST,
+    portfolio_cfg: PortfolioConfig | None = None,
+) -> dict[str, BuyAndHoldReport]:
+    """Run buy-and-hold on hourly train, val, and test parquets (if present)."""
+    out: dict[str, BuyAndHoldReport] = {}
+    for name, path in (("train", train_path), ("val", val_path), ("test", test_path)):
+        if path.is_file():
+            out[name] = run_buy_and_hold_on_split(
+                path,
+                split_name=name,
+                portfolio_cfg=portfolio_cfg,
+                log_return_column="log_return_next_1h",
+                periods_per_year=PERIODS_PER_YEAR_HOURLY,
+            )
+    return out
+
+
 def print_buy_and_hold_summary(reports):
     """Pretty-print metrics for each split."""
     for name, rep in reports.items():
@@ -164,9 +193,22 @@ def print_buy_and_hold_summary(reports):
 
 
 def main() -> None:
-    reports = run_buy_and_hold_all_splits()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run buy-and-hold baselines")
+    parser.add_argument(
+        "--frequency", choices=["daily", "hourly"], default="daily",
+        help="Data frequency (default: daily)",
+    )
+    args = parser.parse_args()
+
+    if args.frequency == "hourly":
+        reports = run_buy_and_hold_all_splits_hourly()
+    else:
+        reports = run_buy_and_hold_all_splits()
+
     if not reports:
-        print("No processed splits found under data/processed/. Run Step 2 pipeline first.")
+        print("No processed splits found under data/processed/. Run the data pipeline first.")
         return
     print_buy_and_hold_summary(reports)
 

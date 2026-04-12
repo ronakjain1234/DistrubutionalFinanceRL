@@ -82,6 +82,12 @@ class DatasetConfig:
     out_dir: Path = Path("data/processed")
     """Directory for saved dataset files."""
 
+    out_filename: str = "offline_dataset_train.npz"
+    """Name of the output .npz file."""
+
+    log_return_column: str = "log_return_next_1d"
+    """Forward return column to use in the environment."""
+
     seed: int = 42
     """Master random seed — all stochastic policies derive from this."""
 
@@ -106,9 +112,19 @@ def _child_rng(parent: np.random.Generator) -> np.random.Generator:
     return np.random.default_rng(parent.integers(1 << 63))
 
 
+# Hourly feature name mappings (daily defaults are built into the policy classes)
+HOURLY_FEATURE_KWARGS: dict[str, dict[str, str]] = {
+    "trend": {"momentum_feature": "log_ret_4", "ma_feature": "ma_ratio_24"},
+    "mean_rev": {"rsi_feature": "rsi_14", "ma_feature": "ma_ratio_24"},
+    "vol_regime": {"vol_feature": "vol_24", "momentum_feature": "log_ret_168"},
+}
+
+
 def build_policy_suite(
     feature_columns: list[str],
     cfg: DatasetConfig,
+    *,
+    hourly: bool = False,
 ) -> list[BehaviorPolicy]:
     """
     Create the full suite of behavior policies.
@@ -120,18 +136,23 @@ def build_policy_suite(
     2. Three *epsilon-greedy* wrappers around the signal-based policies.
     3. One *mixture* policy that delegates per-step to all six cores.
 
-    Total: 10 episodes × n_rows ≈ 16 000 transitions for daily BTC.
+    Total: 10 episodes × n_rows transitions.
     """
     rng = np.random.default_rng(cfg.seed)
+
+    # Feature name kwargs for policies that reference specific features
+    trend_kw = HOURLY_FEATURE_KWARGS["trend"] if hourly else {}
+    mr_kw = HOURLY_FEATURE_KWARGS["mean_rev"] if hourly else {}
+    vol_kw = HOURLY_FEATURE_KWARGS["vol_regime"] if hourly else {}
 
     # ── core policies ──────────────────────────────────────────────────
     buy_hold = BuyAndHoldPolicy()
     random_pol = RandomPolicy(rng=_child_rng(rng))
-    trend = TrendFollowingPolicy(feature_columns)
-    mean_rev = MeanReversionPolicy(feature_columns)
+    trend = TrendFollowingPolicy(feature_columns, **trend_kw)
+    mean_rev = MeanReversionPolicy(feature_columns, **mr_kw)
     macd = MACDCrossoverPolicy(feature_columns)
     sd_zone = SupplyDemandPolicy(feature_columns)
-    vol_regime = VolatilityRegimePolicy(feature_columns)
+    vol_regime = VolatilityRegimePolicy(feature_columns, **vol_kw)
 
     policies: list[BehaviorPolicy] = [
         buy_hold, random_pol, trend, mean_rev, macd, sd_zone, vol_regime,
@@ -147,11 +168,11 @@ def build_policy_suite(
     mix_components = [
         BuyAndHoldPolicy(),
         RandomPolicy(rng=_child_rng(rng)),
-        TrendFollowingPolicy(feature_columns),
-        MeanReversionPolicy(feature_columns),
+        TrendFollowingPolicy(feature_columns, **trend_kw),
+        MeanReversionPolicy(feature_columns, **mr_kw),
         MACDCrossoverPolicy(feature_columns),
         SupplyDemandPolicy(feature_columns),
-        VolatilityRegimePolicy(feature_columns),
+        VolatilityRegimePolicy(feature_columns, **vol_kw),
     ]
     policies.append(
         MixturePolicy(mix_components, list(cfg.mixture_weights), rng=_child_rng(rng))
@@ -364,7 +385,10 @@ def build_offline_dataset(cfg: DatasetConfig | None = None) -> Path:
     cfg.out_dir.mkdir(parents=True, exist_ok=True)
 
     # ── environment ────────────────────────────────────────────────────
-    env = OfflineTradingEnv(EnvConfig(data_path=cfg.data_path))
+    env = OfflineTradingEnv(EnvConfig(
+        data_path=cfg.data_path,
+        log_return_column=cfg.log_return_column,
+    ))
     LOG.info(
         "Loaded env: %d rows, obs_dim=%d, features=%s",
         env.n_rows,
@@ -373,7 +397,8 @@ def build_offline_dataset(cfg: DatasetConfig | None = None) -> Path:
     )
 
     # ── behavior policies ──────────────────────────────────────────────
-    policies = build_policy_suite(env.feature_columns, cfg)
+    hourly = cfg.log_return_column == "log_return_next_1h"
+    policies = build_policy_suite(env.feature_columns, cfg, hourly=hourly)
     LOG.info("Created %d behavior policies", len(policies))
 
     # ── collect transitions ────────────────────────────────────────────
@@ -400,7 +425,7 @@ def build_offline_dataset(cfg: DatasetConfig | None = None) -> Path:
     _print_stats(stats)
 
     # ── save ───────────────────────────────────────────────────────────
-    out_path = cfg.out_dir / "offline_dataset_train.npz"
+    out_path = cfg.out_dir / cfg.out_filename
     np.savez_compressed(
         out_path,
         observations=combined["observations"],
@@ -421,11 +446,30 @@ def build_offline_dataset(cfg: DatasetConfig | None = None) -> Path:
 # ── CLI entry point ────────────────────────────────────────────────────────
 
 def main() -> None:
+    import argparse
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(name)-30s  %(levelname)-7s  %(message)s",
     )
-    path = build_offline_dataset()
+
+    parser = argparse.ArgumentParser(description="Build offline RL dataset")
+    parser.add_argument(
+        "--frequency", choices=["daily", "hourly"], default="daily",
+        help="Data frequency (default: daily)",
+    )
+    args = parser.parse_args()
+
+    if args.frequency == "hourly":
+        cfg = DatasetConfig(
+            data_path=Path("data/processed/btc_hourly_train.parquet"),
+            out_filename="offline_dataset_hourly_train.npz",
+            log_return_column="log_return_next_1h",
+        )
+    else:
+        cfg = DatasetConfig()
+
+    path = build_offline_dataset(cfg)
     print(f"Done.  Dataset saved to: {path}")
 
 
