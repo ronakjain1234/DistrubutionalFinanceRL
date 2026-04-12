@@ -28,7 +28,12 @@ from pathlib import Path
 
 import numpy as np
 
-from src.data.build_offline_dataset import load_offline_dataset, to_d3rlpy_dataset
+from src.data.build_offline_dataset import (
+    load_offline_dataset,
+    to_d3rlpy_dataset,
+    get_n_actions,
+    get_position_levels,
+)
 from src.agents.dqn_baseline import DQNBaselineConfig, create_dqn, save_model
 from src.experiments.eval_policies import (
     evaluate_on_splits,
@@ -148,12 +153,14 @@ class _EarlyStopState:
         val_path: str | Path = "data/processed/btc_daily_val.parquet",
         log_return_column: str = "log_return_next_1d",
         periods_per_year: int = 252,
+        position_levels: tuple[float, ...] = (-1.0, 0.0, 1.0),
     ):
         self.patience = patience
         self.save_dir = save_dir
         self.val_path = Path(val_path)
         self.log_return_column = log_return_column
         self.periods_per_year = periods_per_year
+        self.position_levels = position_levels
         self.best_sharpe: float = -float("inf")
         self.epochs_without_improvement: int = 0
         self.best_epoch: int = 0
@@ -173,6 +180,7 @@ class _EarlyStopState:
             d3rlpy_actions=True,
             log_return_column=self.log_return_column,
             periods_per_year=self.periods_per_year,
+            position_levels=self.position_levels,
         )
         sharpe = result.metrics["sharpe"]
         ret = result.metrics["total_return"]
@@ -215,11 +223,13 @@ def main(argv: list[str] | None = None) -> None:
     LOG.info("Loading offline dataset from %s ...", args.dataset)
     raw = load_offline_dataset(args.dataset)
     dataset = to_d3rlpy_dataset(raw)
+    n_actions = get_n_actions(raw)
+    position_levels = get_position_levels(raw)
     LOG.info(
-        "Dataset: %d transitions, obs_dim=%d, action_space=%s",
+        "Dataset: %d transitions, obs_dim=%d, action_space=Discrete(%d)",
         dataset.transition_count,
         raw["observations"].shape[1],
-        "Discrete(3)",
+        n_actions,
     )
 
     # ── 2. Create DQN agent ───────────────────────────────────────────
@@ -254,6 +264,7 @@ def main(argv: list[str] | None = None) -> None:
         val_path=args.val_path,
         log_return_column=args.log_return_column,
         periods_per_year=args.periods_per_year,
+        position_levels=position_levels,
     )
 
     algo.fit(
@@ -288,6 +299,9 @@ def main(argv: list[str] | None = None) -> None:
         policy_name=label,
         d3rlpy_actions=True,
         verbose=True,
+        log_return_column=args.log_return_column,
+        periods_per_year=args.periods_per_year,
+        position_levels=position_levels,
     )
 
     # ── 7. Quick summary ──────────────────────────────────────────────

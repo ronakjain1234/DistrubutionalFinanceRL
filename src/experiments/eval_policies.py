@@ -22,7 +22,12 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
-from src.env.offline_trading_env import OfflineTradingEnv, EnvConfig
+from src.env.offline_trading_env import (
+    OfflineTradingEnv,
+    EnvConfig,
+    POSITION_LEVELS_3,
+    POSITION_LEVELS_7,
+)
 from src.env.portfolio import PortfolioConfig
 from src.experiments.baselines import (
     equity_metrics,
@@ -33,8 +38,16 @@ from src.experiments.baselines import (
 LOG = logging.getLogger(__name__)
 
 # ── Action mapping ────────────────────────────────────────────────────────
-# Environment uses {-1, 0, +1};  d3rlpy predicts {0, 1, 2}.
-D3RLPY_TO_ENV_OFFSET = -1
+# With the index-based action space, d3rlpy and the env both use
+# {0, ..., n_actions-1}.  No offset needed.
+D3RLPY_TO_ENV_OFFSET = 0
+
+# Human-readable labels for position levels
+_POSITION_NAMES: dict[float, str] = {
+    -1.0: "short", -0.5: "half_short", -0.25: "qtr_short",
+    0.0: "flat",
+    0.25: "qtr_long", 0.5: "half_long", 1.0: "long",
+}
 
 
 # ── Policy protocol ──────────────────────────────────────────────────────
@@ -60,8 +73,8 @@ class RolloutResult:
     # Time series (lengths: equity = n_steps+1, rest = n_steps)
     equity: np.ndarray
     step_log_returns: np.ndarray
-    actions: np.ndarray          # env actions in {-1, 0, +1}
-    positions: np.ndarray        # same as actions (no slippage model changes them)
+    actions: np.ndarray          # action indices in {0, ..., n_actions-1}
+    positions: np.ndarray        # actual position levels (float)
     turnovers: np.ndarray
     drawdowns: np.ndarray
 
@@ -79,6 +92,7 @@ def rollout_policy(
     d3rlpy_actions: bool = True,
     log_return_column: str = "log_return_next_1d",
     periods_per_year: int = 252,
+    position_levels: tuple[float, ...] = POSITION_LEVELS_3,
 ) -> RolloutResult:
     """
     Roll out *policy* through the offline trading environment on one split.
@@ -86,7 +100,7 @@ def rollout_policy(
     Parameters
     ----------
     policy
-        Anything with a ``predict(obs_array) → action_array`` method.
+        Anything with a ``predict(obs_array) -> action_array`` method.
         For d3rlpy models this is the native interface.
     data_path
         Path to the processed parquet for the split.
@@ -95,14 +109,17 @@ def rollout_policy(
     portfolio_cfg
         Portfolio simulation config (fees, slippage, etc.).
     d3rlpy_actions
-        If True, assumes ``policy.predict`` returns actions in {0,1,2}
-        and remaps to {-1,0,+1} for the environment.  Set False if
-        the policy already returns env-native actions.
+        If True, applies ``D3RLPY_TO_ENV_OFFSET`` (currently 0).
+        Kept for API compatibility.
+    position_levels
+        Allowed position sizes.  Must match the action space the model
+        was trained on.
     """
     env_cfg = EnvConfig(
         data_path=Path(data_path),
         portfolio_cfg=portfolio_cfg or PortfolioConfig(),
         log_return_column=log_return_column,
+        position_levels=position_levels,
     )
     env = OfflineTradingEnv(env_cfg)
 
@@ -141,12 +158,18 @@ def rollout_policy(
 
     m = equity_metrics(equity_arr, log_ret_arr, periods_per_year=periods_per_year)
 
-    # Action distribution for logging
+    # Action distribution for logging (dynamic based on position_levels)
     act_arr = np.array(actions_list, dtype=np.int64)
-    for label, val in [("short", -1), ("flat", 0), ("long", 1)]:
-        m[f"action_frac_{label}"] = float(np.mean(act_arr == val))
+    for i, level in enumerate(position_levels):
+        label = _POSITION_NAMES.get(float(level), f"pos_{level:+.2f}")
+        m[f"action_frac_{label}"] = float(np.mean(act_arr == i))
     m["total_turnover"] = float(np.sum(turnovers))
     m["mean_turnover"] = float(np.mean(turnovers))
+
+    # Map action indices to actual position values
+    pos_arr = np.array(
+        [position_levels[a] for a in act_arr], dtype=np.float64,
+    )
 
     return RolloutResult(
         split_name=split_name,
@@ -155,7 +178,7 @@ def rollout_policy(
         equity=equity_arr,
         step_log_returns=log_ret_arr,
         actions=act_arr,
-        positions=act_arr.copy(),
+        positions=pos_arr,
         turnovers=np.array(turnovers, dtype=np.float64),
         drawdowns=np.array(drawdowns[1:], dtype=np.float64),  # align with steps
         metrics=m,
@@ -179,6 +202,7 @@ def compare_to_buy_and_hold(
     portfolio_cfg: PortfolioConfig | None = None,
     log_return_column: str = "log_return_next_1d",
     periods_per_year: int = 252,
+    position_levels: tuple[float, ...] = POSITION_LEVELS_3,
 ) -> list[ComparisonRow]:
     """
     Return a two-row comparison: [policy, buy-and-hold] on the same split.
@@ -247,6 +271,7 @@ def evaluate_on_splits(
     verbose: bool = True,
     log_return_column: str = "log_return_next_1d",
     periods_per_year: int = 252,
+    position_levels: tuple[float, ...] = POSITION_LEVELS_3,
 ) -> dict[str, RolloutResult]:
     """
     Evaluate *policy* on multiple data splits and optionally print comparisons.
@@ -278,6 +303,7 @@ def evaluate_on_splits(
             d3rlpy_actions=d3rlpy_actions,
             log_return_column=log_return_column,
             periods_per_year=periods_per_year,
+            position_levels=position_levels,
         )
         results[split_name] = result
         all_rows.extend(
@@ -285,6 +311,7 @@ def evaluate_on_splits(
                 result, policy_name, portfolio_cfg,
                 log_return_column=log_return_column,
                 periods_per_year=periods_per_year,
+                position_levels=position_levels,
             )
         )
 

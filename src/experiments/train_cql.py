@@ -39,7 +39,12 @@ from pathlib import Path
 
 import numpy as np
 
-from src.data.build_offline_dataset import load_offline_dataset, to_d3rlpy_dataset
+from src.data.build_offline_dataset import (
+    load_offline_dataset,
+    to_d3rlpy_dataset,
+    get_n_actions,
+    get_position_levels,
+)
 from src.agents.cql import CQLConfig, create_cql, save_model, load_model
 from src.experiments.eval_policies import (
     evaluate_on_splits,
@@ -201,10 +206,9 @@ def compute_q_stats(
     conservatism = float((logsumexp - q_max).mean())
 
     # Greedy action distribution on val
-    greedy = q_values.argmax(axis=1)  # in {0,1,2} = {short,flat,long}
-    labels = {0: "short", 1: "flat", 2: "long"}
+    greedy = q_values.argmax(axis=1)
     action_frac = {
-        f"greedy_action_frac_{labels[a]}": float((greedy == a).mean())
+        f"greedy_action_frac_{a}": float((greedy == a).mean())
         for a in range(n_actions)
     }
 
@@ -229,6 +233,8 @@ class _TrainingDiagnostics:
     val_path: Path
     log_return_column: str = "log_return_next_1d"
     periods_per_year: int = 252
+    n_actions: int = 3
+    position_levels: tuple[float, ...] = (-1.0, 0.0, 1.0)
 
     best_sharpe: float = field(default=-float("inf"))
     best_epoch: int = 0
@@ -250,6 +256,7 @@ class _TrainingDiagnostics:
             d3rlpy_actions=True,
             log_return_column=self.log_return_column,
             periods_per_year=self.periods_per_year,
+            position_levels=self.position_levels,
         )
         sharpe = result.metrics["sharpe"]
         ret = result.metrics["total_return"]
@@ -257,7 +264,9 @@ class _TrainingDiagnostics:
 
         # ── 2. Q-value diagnostics on held-out states ─────────────────
         try:
-            q_stats = compute_q_stats(algo, self.val_observations)
+            q_stats = compute_q_stats(
+                algo, self.val_observations, n_actions=self.n_actions,
+            )
         except Exception as e:  # noqa: BLE001
             LOG.warning("Q-stats computation failed: %s", e)
             q_stats = {}
@@ -336,11 +345,13 @@ def main(argv: list[str] | None = None) -> None:
     LOG.info("Loading offline dataset from %s ...", args.dataset)
     raw = load_offline_dataset(args.dataset)
     dataset = to_d3rlpy_dataset(raw)
+    n_actions = get_n_actions(raw)
+    position_levels = get_position_levels(raw)
     LOG.info(
-        "Dataset: %d transitions, obs_dim=%d, action_space=%s",
+        "Dataset: %d transitions, obs_dim=%d, action_space=Discrete(%d)",
         dataset.transition_count,
         raw["observations"].shape[1],
-        "Discrete(3)",
+        n_actions,
     )
 
     # ── 2. Create CQL agent ───────────────────────────────────────────
@@ -394,6 +405,8 @@ def main(argv: list[str] | None = None) -> None:
         val_path=val_path,
         log_return_column=args.log_return_column,
         periods_per_year=args.periods_per_year,
+        n_actions=n_actions,
+        position_levels=position_levels,
     )
 
     # ── 4. Train ──────────────────────────────────────────────────────
@@ -437,6 +450,7 @@ def main(argv: list[str] | None = None) -> None:
         verbose=True,
         log_return_column=args.log_return_column,
         periods_per_year=args.periods_per_year,
+        position_levels=position_levels,
     )
 
     # ── 8. Optional side-by-side comparison with DQN baseline ────────
@@ -452,6 +466,7 @@ def main(argv: list[str] | None = None) -> None:
                 verbose=True,
                 log_return_column=args.log_return_column,
                 periods_per_year=args.periods_per_year,
+                position_levels=position_levels,
             )
         except Exception as e:  # noqa: BLE001
             LOG.warning("Could not evaluate DQN baseline: %s", e)

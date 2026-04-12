@@ -11,8 +11,10 @@ from .portfolio import (
 
 from .offline_trading_env import (
     EnvConfig,
-    N_ACTIONS,
     OfflineTradingEnv,
+    POSITION_LEVELS_3,
+    POSITION_LEVELS_7,
+    snap_to_action,
 )
 
 __all__ = [
@@ -23,6 +25,8 @@ __all__ = [
     "PortfolioResult",
     "simulate_portfolio",
     "EnvConfig",
-    "N_ACTIONS",
     "OfflineTradingEnv",
+    "POSITION_LEVELS_3",
+    "POSITION_LEVELS_7",
+    "snap_to_action",
 ]

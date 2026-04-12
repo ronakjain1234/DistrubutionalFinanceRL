@@ -226,7 +226,7 @@ def _make_features(df):
 def _make_hourly_features(df):
     """Build feature panel from hourly OHLCV data.
 
-    Returns (df_with_features, feature_col_names). Adds ~27 features:
+    Returns (df_with_features, feature_col_names). Adds 35 features:
     - Rolling log returns at 1h, 4h, 24h, 168h (1 week)
     - Realized volatility at 24h, 168h
     - MA momentum ratios at 24h, 72h, 168h
@@ -235,6 +235,9 @@ def _make_hourly_features(df):
     - Calendar encodings: hour_sin, hour_cos, dow_sin, dow_cos
     - vol_ratio (24h/168h), volume_ratio_24h (vol/SMA_24)
     - Return autocorrelation at lags 1, 4, 24
+    - OHLC intrabar: close_in_range, bar_body_ratio, log_hl_range
+    - Parkinson volatility (24h, 168h), Garman-Klass volatility (24h, 168h)
+    - Bollinger %B (24h)
     - Supply/demand zone features (hourly-tuned)
     - Target: log_return_next_1h
     """
@@ -300,6 +303,51 @@ def _make_hourly_features(df):
             log_ret_1h.rolling(48).corr(lagged)
         )
 
+    # ── OHLC intrabar features ───────────────────────────────────────
+
+    high = df["high"]
+    low = df["low"]
+    open_ = df["open"]
+    hl_range = high - low
+
+    # Close-in-range: where the bar closed relative to its range
+    # 1.0 = closed at high (buyers won), 0.0 = closed at low (sellers won)
+    df["close_in_range"] = (close - low) / hl_range.replace(0, np.nan)
+    df["close_in_range"] = df["close_in_range"].clip(0, 1).fillna(0.5)
+
+    # Bar body ratio: directional commitment vs indecision
+    # 1.0 = full Marubozu (strong conviction), 0.0 = doji (indecision)
+    df["bar_body_ratio"] = (close - open_).abs() / hl_range.replace(0, np.nan)
+    df["bar_body_ratio"] = df["bar_body_ratio"].clip(0, 1).fillna(0.0)
+
+    # Log high-low range: intrabar volatility per candle
+    df["log_hl_range"] = np.log((high / low).replace(0, np.nan).clip(lower=1e-10))
+
+    # Parkinson volatility (rolling 24h and 168h)
+    # sqrt(1/(4*n*ln2) * sum(log(H/L)^2))
+    log_hl_sq = np.log(high / low.replace(0, np.nan)) ** 2
+    for w in [24, 168]:
+        df[f"parkinson_vol_{w}"] = np.sqrt(
+            log_hl_sq.rolling(w).mean() / (4 * np.log(2))
+        )
+
+    # Garman-Klass volatility (rolling 24h and 168h)
+    # sqrt(1/n * sum(0.5*log(H/L)^2 - (2*ln2-1)*log(C/O)^2))
+    log_co_sq = np.log(close / open_.replace(0, np.nan)) ** 2
+    gk_term = 0.5 * log_hl_sq - (2 * np.log(2) - 1) * log_co_sq
+    for w in [24, 168]:
+        df[f"garman_klass_vol_{w}"] = np.sqrt(
+            gk_term.rolling(w).mean().clip(lower=0)
+        )
+
+    # Bollinger %B (24h window, 2 std bands)
+    sma_24 = close.rolling(24).mean()
+    std_24 = close.rolling(24).std(ddof=0)
+    upper_band = sma_24 + 2 * std_24
+    lower_band = sma_24 - 2 * std_24
+    band_width = upper_band - lower_band
+    df["bollinger_pctb"] = (close - lower_band) / band_width.replace(0, np.nan)
+
     # Supply / demand zone features (hourly-tuned parameters)
     sd = _supply_demand_features(
         close.to_numpy(dtype=np.float64),
@@ -336,6 +384,16 @@ def _make_hourly_features(df):
             "ret_autocorr_1",
             "ret_autocorr_4",
             "ret_autocorr_24",
+            # OHLC intrabar features
+            "close_in_range",
+            "bar_body_ratio",
+            "log_hl_range",
+            "parkinson_vol_24",
+            "parkinson_vol_168",
+            "garman_klass_vol_24",
+            "garman_klass_vol_168",
+            "bollinger_pctb",
+            # S/D zones
             "sd_dist_demand",
             "sd_dist_supply",
             "sd_zone_signal",
