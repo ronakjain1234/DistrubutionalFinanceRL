@@ -1,3 +1,5 @@
+claude --resume 43514259-7a68-4b3a-be44-3e2488af12b9
+
 # Ensemble Alpha Tuning Results
 
 **Date:** 2026-04-12

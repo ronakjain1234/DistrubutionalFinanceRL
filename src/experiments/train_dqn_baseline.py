@@ -138,6 +138,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Directory for saved model.",
     )
 
+    p.add_argument("--seed", type=int, default=42)
+
     return p.parse_args(argv)
 
 
@@ -266,6 +268,10 @@ def main(argv: list[str] | None = None) -> None:
         periods_per_year=args.periods_per_year,
         position_levels=position_levels,
     )
+
+    import d3rlpy as _d3rlpy
+    _d3rlpy.seed(args.seed)
+    LOG.info("Random seed set to %d", args.seed)
 
     algo.fit(
         dataset,

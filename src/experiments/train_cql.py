@@ -158,6 +158,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "(skipped if the file does not exist).",
     )
 
+    p.add_argument("--seed", type=int, default=42)
+
     return p.parse_args(argv)
 
 
@@ -410,6 +412,10 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # ── 4. Train ──────────────────────────────────────────────────────
+    import d3rlpy as _d3rlpy
+    _d3rlpy.seed(args.seed)
+    LOG.info("Random seed set to %d", args.seed)
+
     LOG.info(
         "Starting training: %d steps, %d per epoch, alpha=%.3f",
         cfg.n_steps, cfg.n_steps_per_epoch, cfg.alpha,
