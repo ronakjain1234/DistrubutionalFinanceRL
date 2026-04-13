@@ -294,9 +294,15 @@ def main(argv: list[str] | None = None) -> None:
         label = cfg.algo.upper()
 
     # ── 6. Evaluate on val / test vs buy-and-hold ─────────────────────
+    # Derive split paths from val_path (e.g. btc_hourly_val -> btc_hourly_test)
+    val_p = str(args.val_path)
+    test_p = val_p.replace("_val.", "_test.")
+    eval_splits = {"val": val_p, "test": test_p}
+
     results = evaluate_on_splits(
         eval_algo,
         policy_name=label,
+        splits=eval_splits,
         d3rlpy_actions=True,
         verbose=True,
         log_return_column=args.log_return_column,

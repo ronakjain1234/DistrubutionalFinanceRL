@@ -441,9 +441,14 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # ── 7. Evaluate on val + test vs buy-and-hold ────────────────────
+    val_p = str(args.val_path)
+    test_p = val_p.replace("_val.", "_test.")
+    eval_splits = {"val": val_p, "test": test_p}
+
     dist_results = evaluate_on_splits(
         eval_agent,
         policy_name=label,
+        splits=eval_splits,
         d3rlpy_actions=True,
         verbose=True,
         log_return_column=args.log_return_column,
@@ -461,6 +466,7 @@ def main(argv: list[str] | None = None) -> None:
             evaluate_on_splits(
                 cql_algo,
                 policy_name="CQL (baseline)",
+                splits=eval_splits,
                 d3rlpy_actions=True,
                 verbose=True,
                 log_return_column=args.log_return_column,
@@ -473,13 +479,14 @@ def main(argv: list[str] | None = None) -> None:
     # ── 9. Compare with DQN baseline ─────────────────────────────────
     dqn_path = Path(args.dqn_model)
     if dqn_path.is_file():
-        LOG.info("Found DQN baseline at %s — running comparison.", dqn_path)
+        LOG.info("Found DQN baseline at %s -- running comparison.", dqn_path)
         try:
             import d3rlpy
             dqn_algo = d3rlpy.load_learnable(str(dqn_path), device="cpu:0")
             evaluate_on_splits(
                 dqn_algo,
                 policy_name="DQN (baseline)",
+                splits=eval_splits,
                 d3rlpy_actions=True,
                 verbose=True,
                 log_return_column=args.log_return_column,
