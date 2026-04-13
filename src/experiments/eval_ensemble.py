@@ -1,10 +1,10 @@
 """
-Ensemble evaluation: combine daily DistCQL + CQL predictions.
+Ensemble evaluation: combine multiple model predictions.
 
 Strategies:
-1. majority_vote: Both models vote; ties broken by DistCQL (the better model)
-2. average_position: Average the position levels, snap to nearest valid action
-3. veto_short: Use DistCQL's action unless both agree to short
+1. average_position: Average all models' position levels, snap to nearest valid action
+2. majority_vote: Each model votes for an action; most common wins (ties → long)
+3. veto_short: Only short if ALL models agree; otherwise use average of non-short models
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+from collections import Counter
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from src.env.portfolio import PortfolioConfig
 from src.experiments.baselines import equity_metrics, run_buy_and_hold_on_split
 from src.agents.distributional_qnet import DistributionalCQLAgent
 from src.agents.cql import load_model as load_cql
+from src.agents.dqn_baseline import load_model as load_dqn
 
 LOG = logging.getLogger(__name__)
 
@@ -27,57 +29,46 @@ POSITION_LEVELS = POSITION_LEVELS_3  # (-1.0, 0.0, 1.0)
 
 
 class EnsemblePolicy:
-    """Combine two models into one policy."""
+    """Combine N models into one policy."""
 
-    def __init__(self, dist_cql, cql_model, strategy: str = "majority_vote"):
-        self.dist_cql = dist_cql
-        self.cql = cql_model
+    def __init__(self, models: list, model_names: list[str],
+                 d3rlpy_flags: list[bool], strategy: str = "average_position"):
+        self.models = models
+        self.model_names = model_names
+        self.d3rlpy_flags = d3rlpy_flags
         self.strategy = strategy
 
+    def _get_all_actions(self, x: np.ndarray) -> list[int]:
+        """Get action index from each model."""
+        actions = []
+        for model in self.models:
+            actions.append(int(model.predict(x)[0]))
+        return actions
+
     def predict(self, x: np.ndarray) -> np.ndarray:
-        # Get actions from both models
-        # DistCQL: predict returns action indices directly
-        dist_action = int(self.dist_cql.predict(x)[0])
-        cql_action = int(self.cql.predict(x)[0])
+        actions = self._get_all_actions(x)
+        positions = [POSITION_LEVELS[a] for a in actions]
 
-        # Map to position levels: 0=-1.0, 1=0.0, 2=+1.0
-        dist_pos = POSITION_LEVELS[dist_action]
-        cql_pos = POSITION_LEVELS[cql_action]
-
-        if self.strategy == "majority_vote":
-            # If they agree, use that action
-            if dist_action == cql_action:
-                final_action = dist_action
-            else:
-                # Tie: use DistCQL (the better model)
-                final_action = dist_action
-
-        elif self.strategy == "average_position":
-            avg_pos = (dist_pos + cql_pos) / 2.0
-            # Snap to nearest valid position level
+        if self.strategy == "average_position":
+            avg_pos = sum(positions) / len(positions)
             final_action = int(np.argmin([abs(avg_pos - p) for p in POSITION_LEVELS]))
 
-        elif self.strategy == "veto_short":
-            # Only go short if BOTH models agree
-            if dist_pos == -1.0 and cql_pos == -1.0:
-                final_action = 0  # short
-            elif dist_pos >= 0 and cql_pos >= 0:
-                # Both non-short: take the more aggressive (higher) position
-                final_action = max(dist_action, cql_action)
-            else:
-                # One wants short, other doesn't: go flat or long
-                # Use the non-short model's action
-                if dist_pos >= 0:
-                    final_action = dist_action
-                else:
-                    final_action = cql_action
+        elif self.strategy == "majority_vote":
+            counts = Counter(actions)
+            # Most common action; ties broken by highest action index (long bias)
+            final_action = max(counts.keys(), key=lambda a: (counts[a], a))
 
-        elif self.strategy == "cql_unless_short":
-            # Use CQL (the active trader) but override shorts with DistCQL
-            if cql_pos == -1.0 and dist_pos >= 0:
-                final_action = dist_action  # DistCQL overrides the short
+        elif self.strategy == "veto_short":
+            # Only short if ALL models agree
+            if all(p == -1.0 for p in positions):
+                final_action = 0  # short
             else:
-                final_action = cql_action
+                # Average the non-short positions (or all if none are short)
+                non_short = [p for p in positions if p > -1.0]
+                if not non_short:
+                    non_short = positions
+                avg = sum(non_short) / len(non_short)
+                final_action = int(np.argmin([abs(avg - p) for p in POSITION_LEVELS]))
 
         else:
             raise ValueError(f"Unknown strategy: {self.strategy}")
@@ -133,17 +124,41 @@ def main():
     p = argparse.ArgumentParser(description="Ensemble evaluation")
     p.add_argument("--dist_cql_path", default="models/dist_cql/model_best")
     p.add_argument("--cql_path", default="models/cql/model_best.d3")
+    p.add_argument("--dqn_path", default="models/dqn_baseline/model_best.d3")
     p.add_argument("--strategy", nargs="+",
-                   default=["majority_vote", "average_position", "veto_short", "cql_unless_short"])
+                   default=["average_position", "majority_vote", "veto_short"])
     p.add_argument("--split", default="both", choices=["val", "test", "both"])
+    p.add_argument("--models", nargs="+", default=["dist_cql", "cql", "dqn"],
+                   help="Which models to include (default: all three)")
     args = p.parse_args()
 
-    # Load models
-    LOG.info("Loading DistCQL from %s", args.dist_cql_path)
-    dist_cql = DistributionalCQLAgent.load(args.dist_cql_path)
+    # Load requested models
+    all_models = []
+    all_names = []
+    all_d3rlpy = []
 
-    LOG.info("Loading CQL from %s", args.cql_path)
-    cql = load_cql(args.cql_path)
+    if "dist_cql" in args.models:
+        LOG.info("Loading DistCQL from %s", args.dist_cql_path)
+        dist_cql = DistributionalCQLAgent.load(args.dist_cql_path)
+        all_models.append(dist_cql)
+        all_names.append("DistCQL")
+        all_d3rlpy.append(False)
+
+    if "cql" in args.models:
+        LOG.info("Loading CQL from %s", args.cql_path)
+        cql = load_cql(args.cql_path)
+        all_models.append(cql)
+        all_names.append("CQL")
+        all_d3rlpy.append(True)
+
+    if "dqn" in args.models:
+        LOG.info("Loading DQN from %s", args.dqn_path)
+        dqn = load_dqn(args.dqn_path)
+        all_models.append(dqn)
+        all_names.append("DQN")
+        all_d3rlpy.append(True)
+
+    LOG.info("Ensemble members: %s", all_names)
 
     # Determine splits
     splits = {}
@@ -156,18 +171,18 @@ def main():
     periods_per_year = 252
 
     # Run all strategies
+    ensemble_label = "+".join(all_names)
     print("\n" + "=" * 90)
-    print("  ENSEMBLE EVALUATION")
+    print(f"  ENSEMBLE EVALUATION — {ensemble_label}")
     print("=" * 90)
 
     for strategy in args.strategy:
         print(f"\n--- Strategy: {strategy} ---")
-        ensemble = EnsemblePolicy(dist_cql, cql, strategy=strategy)
+        ensemble = EnsemblePolicy(all_models, all_names, all_d3rlpy, strategy=strategy)
 
         for split_name, path in splits.items():
             m, acts = run_rollout(ensemble, path, split_name, log_return_column, periods_per_year)
 
-            # Also get B&H for comparison
             bh = run_buy_and_hold_on_split(
                 path, split_name=split_name,
                 log_return_column=log_return_column,
@@ -179,23 +194,40 @@ def main():
                   f"actions=[S:{m['action_frac_short']:.0%} F:{m['action_frac_flat']:.0%} L:{m['action_frac_long']:.0%}]  "
                   f"(B&H: {bh.metrics['total_return']:+.1%})")
 
-    # Also show individual models for comparison
+    # Also run 2-model subsets for comparison
+    if len(all_models) == 3:
+        print(f"\n--- 2-Model Subsets (average_position) ---")
+        pairs = [
+            ([0, 1], "DistCQL+CQL"),
+            ([0, 2], "DistCQL+DQN"),
+            ([1, 2], "CQL+DQN"),
+        ]
+        for idxs, pair_name in pairs:
+            pair_models = [all_models[i] for i in idxs]
+            pair_names = [all_names[i] for i in idxs]
+            pair_flags = [all_d3rlpy[i] for i in idxs]
+            ensemble = EnsemblePolicy(pair_models, pair_names, pair_flags, strategy="average_position")
+
+            for split_name, path in splits.items():
+                m, acts = run_rollout(ensemble, path, split_name, log_return_column, periods_per_year)
+                print(f"  {pair_name:>15s} {split_name:>5s}: return={m['total_return']:+.1%}  "
+                      f"sharpe={m['sharpe']:.2f}  maxDD={m['max_drawdown']:.1%}  "
+                      f"actions=[S:{m['action_frac_short']:.0%} F:{m['action_frac_flat']:.0%} L:{m['action_frac_long']:.0%}]")
+
+    # Individual models for reference
     print(f"\n--- Individual Models (reference) ---")
-    for model_name, model, d3rlpy_actions in [
-        ("DistCQL", dist_cql, False),
-        ("CQL", cql, True),
-    ]:
+    for model, name, is_d3rlpy in zip(all_models, all_names, all_d3rlpy):
         for split_name, path in splits.items():
             from src.experiments.eval_policies import rollout_policy
             result = rollout_policy(
                 model, data_path=path, split_name=split_name,
-                d3rlpy_actions=d3rlpy_actions,
+                d3rlpy_actions=is_d3rlpy,
                 log_return_column=log_return_column,
                 periods_per_year=periods_per_year,
                 position_levels=POSITION_LEVELS,
             )
             m = result.metrics
-            print(f"  {model_name:>10s} {split_name:>5s}: return={m['total_return']:+.1%}  "
+            print(f"  {name:>10s} {split_name:>5s}: return={m['total_return']:+.1%}  "
                   f"sharpe={m['sharpe']:.2f}  maxDD={m['max_drawdown']:.1%}  "
                   f"actions=[S:{m.get('action_frac_short',0):.0%} F:{m.get('action_frac_flat',0):.0%} L:{m.get('action_frac_long',0):.0%}]")
 
