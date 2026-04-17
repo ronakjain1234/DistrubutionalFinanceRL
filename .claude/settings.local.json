@@ -1,21 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python:*)",
-      "Bash(find C:UsersronakDistrubutionalFinanceRL -type f -name *.toml -o -name *.cfg -o -name *.ini -o -name *.yml)",
-      "Bash(.venv/Scripts/python.exe -c \"from d3rlpy.models.encoders import VectorEncoderFactory; help\\(VectorEncoderFactory.__init__\\)\")",
-      "Bash(.venv/Scripts/python.exe -c \"\nimport numpy as np\nd = np.load\\('data/processed/offline_dataset_train.npz'\\)\nprint\\('Keys:', list\\(d.keys\\(\\)\\)\\)\nfor k in d.keys\\(\\):\n    print\\(f'  {k}: shape={d[k].shape}, dtype={d[k].dtype}'\\)\n\" 2>&1)",
-      "Bash(.venv/Scripts/python.exe -c \"\nfrom d3rlpy.models.optimizers import AdamFactory\nimport inspect\nsig = inspect.signature\\(AdamFactory.__init__\\)\nfor name, param in sig.parameters.items\\(\\):\n    print\\(f'{name}: {param.default}'\\)\n\" 2>&1)",
-      "Bash(.venv/Scripts/python.exe -c \"\nfrom d3rlpy.optimizers.optimizers import AdamFactory\nimport inspect\nsig = inspect.signature\\(AdamFactory\\)\nfor name, param in sig.parameters.items\\(\\):\n    print\\(f'{name}: default={param.default}'\\)\n\" 2>&1)",
-      "Bash(.venv/Scripts/python.exe -c \"\nfrom src.agents.dqn_baseline import DQNBaselineConfig, create_dqn\ncfg = DQNBaselineConfig\\(\\)\nprint\\('Config OK:', cfg\\)\nalgo = create_dqn\\(cfg\\)\nprint\\('Agent created:', type\\(algo\\).__name__\\)\n\" 2>&1)",
-      "Bash(.venv/Scripts/python.exe -m src.experiments.train_dqn_baseline)",
-      "Bash(.venv/Scripts/python.exe -m src.experiments.plot_dqn_results)",
-      "Bash(find /c/Users/ronak/DistrubutionalFinanceRL -type d -not -path */.*)",
-      "Bash(grep -E \"\\\\.py$|src|data\")",
-      "Bash(xargs grep:*)",
-      "Bash(.venv/Scripts/python.exe:*)",
-      "Read(//home/ronak/**)",
-      "Bash(python3)"
+      "Bash(*)"
     ]
   },
   "disabledMcpjsonServers": [

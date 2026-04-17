@@ -1,3 +1,5 @@
+claude --resume 43514259-7a68-4b3a-be44-3e2488af12b9
+
 # Daily 3-Action Training Results
 
 **Date:** 2026-04-12
@@ -13,49 +15,49 @@
 
 - **Action space:** 3 discrete levels {-1.0, 0.0, +1.0} (short, flat, long)
 - **Data frequency:** Daily candles
-- **Reward:** position * log_return with drawdown penalty (lambda=1.0, threshold=2%)
+- **Reward:** position \* log_return with drawdown penalty (lambda=1.0, threshold=2%)
 - **Gamma:** 0.95 (effective horizon ~20 trading days)
 
 ### Model-Specific Hyperparameters
 
-| Parameter | DQN | CQL | DistCQL |
-|-----------|-----|-----|---------|
-| hidden | [128, 128] | [256, 256] | [256, 256] |
-| lr | 3e-4 | 1e-4 | 1e-4 |
-| alpha | — | 1.0 | 1.0 |
-| alpha_tail | — | — | 0.5 |
-| n_quantiles | — | — | 51 |
-| n_critics/ensemble | 3 | 3 | 3 |
-| dropout | 0.1 | 0.1 | 0.1 |
-| weight_decay | 1e-4 | 1e-4 | 1e-4 |
-| n_steps | 20,000 | 30,000 | 30,000 |
-| batch_size | 256 | 256 | 256 |
-| target_update | 1,000 | 2,000 | 2,000 |
-| layer_norm | yes | yes | yes |
-| early_stopping | patience=3 | patience=4 | patience=4 |
+| Parameter          | DQN        | CQL        | DistCQL    |
+| ------------------ | ---------- | ---------- | ---------- |
+| hidden             | [128, 128] | [256, 256] | [256, 256] |
+| lr                 | 3e-4       | 1e-4       | 1e-4       |
+| alpha              | —          | 1.0        | 1.0        |
+| alpha_tail         | —          | —          | 0.5        |
+| n_quantiles        | —          | —          | 51         |
+| n_critics/ensemble | 3          | 3          | 3          |
+| dropout            | 0.1        | 0.1        | 0.1        |
+| weight_decay       | 1e-4       | 1e-4       | 1e-4       |
+| n_steps            | 20,000     | 30,000     | 30,000     |
+| batch_size         | 256        | 256        | 256        |
+| target_update      | 1,000      | 2,000      | 2,000      |
+| layer_norm         | yes        | yes        | yes        |
+| early_stopping     | patience=3 | patience=4 | patience=4 |
 
 ---
 
 ## Performance Summary
 
-| Model | Split | Total Return | Sharpe | Max Drawdown | Actions (S/F/L) |
-|-------|-------|-------------|--------|-------------|-----------------|
-| DQN | val | +523.9% | 1.47 | -31.8% | 31% / 13% / 56% |
-| DQN | test | -23.0% | -0.24 | -62.1% | 53% / 11% / 36% |
-| CQL | val | +129.1% | 0.64 | -45.8% | 42% / 2% / 56% |
-| **CQL** | **test** | **+92.3%** | **0.57** | **-37.0%** | **15% / 2% / 83%** |
-| DistCQL | val | +17.1% | 0.12 | -68.7% | 5% / 0% / 95% |
-| **DistCQL** | **test** | **+97.8%** | **0.59** | **-32.1%** | **0% / 0% / 100%** |
-| Buy & Hold | val | -9.6% | -0.09 | -67.4% | 0% / 0% / 100% |
-| Buy & Hold | test | +107.7% | 0.74 | -34.9% | 0% / 0% / 100% |
+| Model       | Split    | Total Return | Sharpe   | Max Drawdown | Actions (S/F/L)    |
+| ----------- | -------- | ------------ | -------- | ------------ | ------------------ |
+| DQN         | val      | +523.9%      | 1.47     | -31.8%       | 31% / 13% / 56%    |
+| DQN         | test     | -23.0%       | -0.24    | -62.1%       | 53% / 11% / 36%    |
+| CQL         | val      | +129.1%      | 0.64     | -45.8%       | 42% / 2% / 56%     |
+| **CQL**     | **test** | **+92.3%**   | **0.57** | **-37.0%**   | **15% / 2% / 83%** |
+| DistCQL     | val      | +17.1%       | 0.12     | -68.7%       | 5% / 0% / 95%      |
+| **DistCQL** | **test** | **+97.8%**   | **0.59** | **-32.1%**   | **0% / 0% / 100%** |
+| Buy & Hold  | val      | -9.6%        | -0.09    | -67.4%       | 0% / 0% / 100%     |
+| Buy & Hold  | test     | +107.7%      | 0.74     | -34.9%       | 0% / 0% / 100%     |
 
 ### Best Epochs (from training logs)
 
-| Model | Best Epoch | Best Val Sharpe | Total Epochs |
-|-------|-----------|----------------|--------------|
-| DQN | unknown | unknown | unknown |
-| CQL | 12 (step 24K) | 0.64 | 15 |
-| DistCQL | 4 (step 8K) | 0.12 | 8 |
+| Model   | Best Epoch    | Best Val Sharpe | Total Epochs |
+| ------- | ------------- | --------------- | ------------ |
+| DQN     | unknown       | unknown         | unknown      |
+| CQL     | 12 (step 24K) | 0.64            | 15           |
+| DistCQL | 4 (step 8K)   | 0.12            | 8            |
 
 ---
 
@@ -83,26 +85,27 @@ DQN shows the worst generalization gap. It learned an aggressive short/long swit
 
 **Why this makes sense:** DQN has no conservatism penalty — it greedily maximizes Q-values, which with daily data and a long training history allows it to memorize regime-specific patterns from the training period. The 31% short / 56% long split on val shows it was actively timing, and the +524% return confirms it was right during val. But these timing signals were overfit to the specific 2022-2023 bear market dynamics and didn't transfer to the 2024-2025 bull market.
 
-This is the opposite of what we saw with hourly data, where DQN was the *best* generalizer. The difference: hourly DQN was implicitly regularized by the smaller network (128x128) and massive dataset (903K transitions), while daily DQN had a much smaller dataset (~20K transitions) relative to network capacity, enabling overfitting.
+This is the opposite of what we saw with hourly data, where DQN was the _best_ generalizer. The difference: hourly DQN was implicitly regularized by the smaller network (128x128) and massive dataset (903K transitions), while daily DQN had a much smaller dataset (~20K transitions) relative to network capacity, enabling overfitting.
 
 ### 4. Daily vs hourly: why daily models generalize differently
 
-| Factor | Daily | Hourly |
-|--------|-------|--------|
-| Dataset size | ~20K transitions | ~903K transitions |
-| Action space | 3 actions | 7 actions |
-| Data per action | ~7K each | 3% for intermediate actions |
-| Signal-to-noise | Higher (daily trends) | Lower (hourly noise) |
-| Gamma | 0.95 (~20 day horizon) | 0.99 (~100 hour horizon) |
+| Factor          | Daily                  | Hourly                      |
+| --------------- | ---------------------- | --------------------------- |
+| Dataset size    | ~20K transitions       | ~903K transitions           |
+| Action space    | 3 actions              | 7 actions                   |
+| Data per action | ~7K each               | 3% for intermediate actions |
+| Signal-to-noise | Higher (daily trends)  | Lower (hourly noise)        |
+| Gamma           | 0.95 (~20 day horizon) | 0.99 (~100 hour horizon)    |
 
 Daily data has a higher signal-to-noise ratio — daily returns are more predictable than hourly returns because intraday noise averages out. With 3 actions and adequate coverage for each, CQL and DistCQL can learn meaningful policies. The hourly models struggled because:
+
 - The 7-action space diluted data coverage (3% per intermediate action)
 - Hourly noise made Q-value estimation harder
 - CQL/DistCQL collapsed to 3 of 7 actions anyway, wasting the expanded action space
 
 ### 5. Q-value stability in daily CQL
 
-A critical difference from the hourly experiments: daily CQL's Q-values were remarkably stable. Q-mean went from -0.55 (epoch 1) to -0.71 (epoch 15) — it actually *decreased* slightly over training. This is the opposite of the hourly CQL models where Q-mean inflated from -1.3 to +2.6 across 10 epochs.
+A critical difference from the hourly experiments: daily CQL's Q-values were remarkably stable. Q-mean went from -0.55 (epoch 1) to -0.71 (epoch 15) — it actually _decreased_ slightly over training. This is the opposite of the hourly CQL models where Q-mean inflated from -1.3 to +2.6 across 10 epochs.
 
 **Why:** The daily dataset has ~20K transitions with 3 actions, giving ~7K samples per action. This provides enough coverage for CQL's conservative penalty to work as intended — it can accurately estimate the gap between in-distribution and out-of-distribution Q-values. With hourly data and 7 actions, the sparse intermediate actions caused the penalty to malfunction.
 
@@ -110,11 +113,11 @@ A critical difference from the hourly experiments: daily CQL's Q-values were rem
 
 ## Trained Models
 
-| Model | Path | Best Epoch | Status |
-|-------|------|-----------|--------|
-| DQN | `models/dqn_baseline/model_best.d3` | unknown | Overfit |
-| CQL | `models/cql/model_best.d3` | 12 | Best active trader |
-| DistCQL | `models/dist_cql/model_best` | 4 | Closest to B&H |
+| Model   | Path                                | Best Epoch | Status             |
+| ------- | ----------------------------------- | ---------- | ------------------ |
+| DQN     | `models/dqn_baseline/model_best.d3` | unknown    | Overfit            |
+| CQL     | `models/cql/model_best.d3`          | 12         | Best active trader |
+| DistCQL | `models/dist_cql/model_best`        | 4          | Closest to B&H     |
 
 ---
 
